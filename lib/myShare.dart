@@ -1,0 +1,1 @@
+export 'myShareAndroid.dart' if (dart.library.html) 'myShareWeb.dart';
