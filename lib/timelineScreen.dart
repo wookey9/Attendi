@@ -1,6 +1,10 @@
 import 'dart:async';
 import 'dart:math';
+import 'package:day_night_time_picker/lib/state/time.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:webviewx/webviewx.dart';
+import 'package:work_inout/userScreen.dart';
 
 import 'checklist.dart';
 import 'package:calendar_timeline/calendar_timeline.dart';
@@ -19,6 +23,8 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:flutter_time_range/flutter_time_range.dart';
 import 'package:flutter_time_picker_spinner/flutter_time_picker_spinner.dart';
 import 'package:pattern_formatter/pattern_formatter.dart';
+
+import 'myAdKakaoFit.dart';
 
 const List<String> expenseType = ['발주', '매장카드','계좌이체', '기타'];
 
@@ -75,6 +81,7 @@ class _TimeLineState extends State<TimeLinePage> {
   late List<bool?> curChecked = [];
   late List<ExpenseItem> _listExpense = [];
   late List<ExpenseItem> _listExpenseOrg = [];
+  late int _minuteInterval = 30;
 
   TextEditingController _inputController = new TextEditingController();
 
@@ -90,6 +97,11 @@ class _TimeLineState extends State<TimeLinePage> {
   late double _calendarRowHeight = 85;
   final double divHeight = 20;
   static const _locale = 'ko';
+
+  int _selectedBottomIndex = 0;
+
+  var _bottomTabController;
+
   String _formatNumber(String s) => NumberFormat.decimalPattern(_locale).format(int.parse(s));
   String get _currency => NumberFormat.compactSimpleCurrency(locale: _locale).currencySymbol;
 
@@ -106,6 +118,7 @@ class _TimeLineState extends State<TimeLinePage> {
   double _timeOfDayToDouble(TimeOfDay tod) => tod.hour + tod.minute / 60.0;
 
   void _initDateInfo() {
+
     _selectedDate = DateTime(DateTime
         .now()
         .year, DateTime
@@ -122,6 +135,12 @@ class _TimeLineState extends State<TimeLinePage> {
     _userId =
         widget.user.replaceAll('-', '').trim() + " - [" + widget.workplace +
             "]";
+    
+    UserDatabase.getMinuteIntervalDb(widget.companyId).then((value) {
+      setState(() {
+        _minuteInterval = value;
+      });
+    });
 
     BranchDatabase.getBranchCollection(companyId: widget.companyId).get().then((
         QuerySnapshot querySnapshot) {
@@ -152,7 +171,7 @@ class _TimeLineState extends State<TimeLinePage> {
               var data = querySnapshot2.docs[i].data()! as Map<String, dynamic>;
               String title = "";
               DateTime writetime = DateTime.now();
-              Map<DateTime, bool> checked = {};
+              Map<DateTime, String> checked = {};
               data.forEach((key, value) {
                 if(key == 'name'){
                   if(value != null && value.length > 0){
@@ -168,7 +187,7 @@ class _TimeLineState extends State<TimeLinePage> {
                   if(value != null){
                     DateTime date = DateFormat('yyyy-MM-dd').parse(key);
                     if(date != null)
-                      checked[date] = value == "true" ? true : false;
+                      checked[date] = value;
                   }
                 }
               });
@@ -185,412 +204,460 @@ class _TimeLineState extends State<TimeLinePage> {
 
   }
 
+  bool isWeekend(DateTime date){
+    String w = DateFormat('E','ko_KR').format(_selectedDate);
+    if(w == '토' || w == '일'){
+      return true;
+    }
+    return false;
+  }
+
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-        onTap: () {
-          FocusScopeNode currentFocus = FocusScope.of(context);
-
-          if (!currentFocus.hasPrimaryFocus) {
-            currentFocus.unfocus();
-          }
-        },
-      onPanUpdate: (details) {
-          /*
-        if (details.delta.dy > 0){
-          print("Dragging in +Y direction");
-          setState((){
-            _calendarFormat = CalendarFormat.month;
-            _fillCalendar = true;
-          });
-        }
-        else{
-          print("Dragging in -Y direction");
-        }
-
-           */
-      },
+    return DefaultTabController(
+        length: 2,
         child: Scaffold(
           backgroundColor: Color(0xFF333A47),
           appBar: AppBar(
-            //automaticallyImplyLeading: false,
-            title:Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
+            automaticallyImplyLeading: _fillCalendar,
+            leadingWidth: 30,
+            backgroundColor: Color(0xFF333A47),
+            title:
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('A',style: TextStyle(fontSize: 30, color: Colors.teal[200], fontWeight: FontWeight.bold),),
-                Padding(padding: EdgeInsets.fromLTRB(0, 0, 0, 2),
-                  child: Text('ttendi', style: TextStyle(fontSize: 20, color: Colors.teal[200],),),),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text((_selectedDate.year != DateTime.now().year?_selectedDate.year.toString() + ' - ' : '') +  _selectedDate.month.toString() + '월 ' + (_fillCalendar ? '' : (_selectedDate.day.toString() + '일')), style: TextStyle(fontSize: 25, color: Colors.teal[200], fontWeight: FontWeight.bold)),
+                    if(!_fillCalendar) Text(' ('+DateFormat('E','ko_KR').format(_selectedDate) + ')', style: TextStyle(fontSize: 25, color: isWeekend(_selectedDate) ? Colors.redAccent[100] : Colors.teal[200], fontWeight: FontWeight.bold)),
+                    if(_fillCalendar) Text(_totalWorkingTime.toString() + '시간', style: TextStyle(fontSize: 24, color: Colors.redAccent[100], fontWeight: FontWeight.bold)),
+                  ],
+                ),
                 Padding(padding: EdgeInsets.fromLTRB(0, 0, 0, 5),
-                  child: Text('  @' + _userId, style: TextStyle(fontSize : 12, color: Colors.white54, ), maxLines: 2,),)
+                  child: Text('  @' + _userId, style: TextStyle(fontSize : 12, color: Colors.white, ), maxLines: 2,),)
               ],
             ),
+
             actions: [
-              IconButton(
-                onPressed: (){
-                  setState((){
-                    _selectedDate = DateTime(DateTime
-                        .now()
-                        .year, DateTime
-                        .now()
-                        .month, DateTime
-                        .now()
-                        .day);
-                    _selectedDateDB = DateFormat('yyyy-MM-dd').format(_selectedDate);
-                    _focusDay = _selectedDate;
-                    _selectedTimeFrom = _startTime[_selectedDate] ?? TimeOfDay(hour: TimeOfDay.now().hour, minute: (TimeOfDay.now().minute / 30).floor() * 30);
-                    _selectedTimeTo = _endTime[_selectedDate] ?? TimeOfDay(hour: TimeOfDay.now().hour, minute: (TimeOfDay.now().minute / 30).floor() * 30);
-                    getDailyDataFromUserDoc(_userId, _selectedDateDB);
-                    if (_restTime[_selectedDate] != null) {
-                      _selectedRestHour = _restTime[_selectedDate]!;
-                    }
-                    else {
-                      _selectedRestHour = 0;
-                    }
-                    //_updateSelectedRestHour();
-                    _inputController.text = _workDiary[_selectedDate] ?? _branchDiaryFormat;
-                    _totalWorkingTime = _updateTotalWorkingTime(_selectedDate);
-                    _diaryFocusNode.unfocus();
-                  });
-                },
-                icon: Icon(Icons.today_outlined)
+              if(_fillCalendar) IconButton(
+                  onPressed: (){
+                    setState((){
+                      _selectedDate = DateTime(DateTime
+                          .now()
+                          .year, DateTime
+                          .now()
+                          .month, DateTime
+                          .now()
+                          .day);
+                      _selectedDateDB = DateFormat('yyyy-MM-dd').format(_selectedDate);
+                      _focusDay = _selectedDate;
+                      _selectedTimeFrom = _startTime[_selectedDate] ?? TimeOfDay(hour: TimeOfDay.now().hour, minute: (TimeOfDay.now().minute / _minuteInterval).floor() * _minuteInterval);
+                      _selectedTimeTo = _endTime[_selectedDate] ?? TimeOfDay(hour: TimeOfDay.now().hour, minute: (TimeOfDay.now().minute / _minuteInterval).floor() * _minuteInterval);
+                      getDailyDataFromUserDoc(_userId, _selectedDateDB);
+                      if (_restTime[_selectedDate] != null) {
+                        _selectedRestHour = _restTime[_selectedDate]!;
+                      }
+                      else {
+                        _selectedRestHour = 0;
+                      }
+                      //_updateSelectedRestHour();
+                      _inputController.text = _workDiary[_selectedDate] ?? _branchDiaryFormat;
+                      _totalWorkingTime = _updateTotalWorkingTime(_selectedDate);
+                      _diaryFocusNode.unfocus();
+                    });
+                  },
+                  icon: Icon(Icons.today_outlined)
               ),
-
             ],
-
-            backgroundColor: Color(0xFF333A47),
           ),
+/*
+          bottomNavigationBar: (!_fillCalendar) ? null : BottomAppBar(
+            child: Container(
+              color: Color(0xFF333A47),
+              child: TabBar(
+                indicator: BoxDecoration(color: Colors.black38),
+                tabs: <Widget>[
+                  Tab(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.calendar_month,color: _getBottomSelectedColor(0),),
+                        Text(" 캘린더", style: TextStyle(color: _getBottomSelectedColor(0)))
+                      ],
+                    ),
+                  ),
+                  Tab(child:
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.access_time_outlined,color: _getBottomSelectedColor(1),),
+                      Text(" 타임라인", style: TextStyle(color: _getBottomSelectedColor(1)))
+                    ],) ),
+                ],
+                controller: _bottomTabController,
+                onTap: (index){
+                  _onBottomItemTapped(index);
+                },
+              ),
+            ),
+          ),
+ */
           body:
           //_fillCalendar ? _buildCalendar() :
           Column(
-            mainAxisSize: MainAxisSize.min,
             children: [
-                _buildCalendar(),
-                if(!_fillCalendar) ...{
-                  if(_calendarExpand == false)...{
-                    Expanded(
-                        child:
-                SingleChildScrollView(
-                  controller: _userScrollController,
-                  child: Column(
-                  children: [
-                    SizedBox(height: 8),
-                    Padding(
-                        padding: EdgeInsets.only(left: 10, top: 0),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            Icon(Icons.work_history_outlined,
-                              color: Colors.white,),
-                            Text(' 근무 시간',
-                              style: TextStyle(
-                                  fontSize: 17, color: Colors.white),
-                              textAlign: TextAlign.center,),
-                          ],
-                        )
-                    ),
-                    Container(
-                      padding: EdgeInsets.only(
-                          top: 15, left: 20, right: 20),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment
-                            .spaceAround,
-                        children: [
-                          TextButton(
-                              style: ButtonStyle(
-                                overlayColor: MaterialStateColor
-                                    .resolveWith((states) =>
-                                Colors.white38),
-                                backgroundColor: MaterialStateColor
-                                    .resolveWith((states) =>
-                                _selectFromTo == "from"
-                                    ? Colors.white38
-                                    : Colors.transparent),
+              _buildCalendar(),
+              if(!_fillCalendar) ...{
+                if(_calendarExpand == false)...{
+                  Expanded(
+                      child:
+                      Material(
+                        color: Color(0xFF333A47),
+                        child: SingleChildScrollView(
+                            controller: _userScrollController,
+                            child: Column(
+                              children: [
+                                getAdKakaoFit('Attendi-web-userScreen-320x100'),
+                                Divider(
+                                    color: Colors.white38,
+                                    thickness: 1,
+                                    height: 1),
+                                Padding(
+                                    padding: EdgeInsets.only(left: 10, top: 10),
+                                    child: Row(
+                                      crossAxisAlignment: CrossAxisAlignment.center,
+                                      children: [
+                                        Icon(Icons.work_history_outlined,
+                                          color: Colors.white,),
+                                        Text(' 근무 시간',
+                                          style: TextStyle(
+                                              fontSize: 17, color: Colors.white),
+                                          textAlign: TextAlign.center,),
+                                      ],
+                                    )
+                                ),
+                                Container(
+                                  padding: EdgeInsets.only(
+                                      top: 15, left: 20, right: 20),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment
+                                        .spaceAround,
+                                    children: [
+                                      TextButton(
+                                          style: ButtonStyle(
+                                            overlayColor: MaterialStateColor
+                                                .resolveWith((states) =>
+                                            Colors.white38),
+                                            backgroundColor: MaterialStateColor
+                                                .resolveWith((states) =>
+                                            _selectFromTo == "from"
+                                                ? Colors.white38
+                                                : Colors.transparent),
 
-                              ),
-                              onPressed: () {
-                                setState(() {
-                                  if (_selectFromTo == "from") {
-                                    _selectFromTo = "";
-                                  }
-                                  else {
-                                    _selectFromTo = "from";
-                                    _timeStreamCon.add(
-                                        convertTimeToDateTime(
-                                            _selectedTimeFrom));
-                                  }
-                                });
-                              },
-                              child: Text(_selectedTimeFrom != null
-                                  ? (_selectedTimeFrom!.format(context))
-                                  : TimeOfDay(hour: TimeOfDay
-                                  .now()
-                                  .hour, minute: (TimeOfDay
-                                  .now()
-                                  .minute / 30).floor() * 30).format(
-                                  context),
-                                style: TextStyle(color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 20),
-                              )
-                          ),
-                          Icon(Icons.arrow_forward,
-                            color: Colors.white38,),
-                          TextButton(
-                              style: ButtonStyle(
-                                overlayColor: MaterialStateColor
-                                    .resolveWith((states) =>
-                                Colors.white38),
-                                backgroundColor: MaterialStateColor
-                                    .resolveWith((states) =>
-                                _selectFromTo == "to"
-                                    ? Colors.white38
-                                    : Colors.transparent),
-                              ),
-                              onPressed: () {
-                                setState(() {
-                                  if (_selectFromTo == "to") {
-                                    _selectFromTo = "";
-                                  }
-                                  else {
-                                    _selectFromTo = "to";
-                                    _timeStreamCon.add(
-                                        convertTimeToDateTime(
-                                            _selectedTimeTo));
-                                  }
-                                });
-                              },
-                              child: Text(_selectedTimeTo != null
-                                  ? (_selectedTimeTo!.format(context))
-                                  : TimeOfDay(hour: TimeOfDay
-                                  .now()
-                                  .hour, minute: (TimeOfDay
-                                  .now()
-                                  .minute / 30).floor() * 30).format(
-                                  context),
-                                style: TextStyle(color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 20),
-                              )
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    Divider(color: Colors.white38,
-                        thickness: 1,
-                        height: divHeight),
-                    GestureDetector(
-                      onVerticalDragUpdate: (_) {},
-                      child: AnimatedContainer(
-                        height: _selectFromTo == "from" ? 150 : 0,
-                        duration: Duration(milliseconds: 300),
-                        onEnd: () {
-                          _updateSelectedRestHour();
-                        },
-                        child: (_selectFromTo == "from") ? getTimeSlider(_selectedTimeFrom) : Container(),
-                      ),
-                    ),
-                    GestureDetector(
-                      onVerticalDragUpdate: (_) {},
-                      child: AnimatedContainer(
-                        height: _selectFromTo == "to" ? 150 : 0,
-                        duration: Duration(milliseconds: 300),
-                        onEnd: () {
-                          _updateSelectedRestHour();
-                        },
-                        child: (_selectFromTo == "to") ? getTimeSlider(_selectedTimeTo) : Container(),
-                      ),
-                    ),
-                    if(_selectFromTo != "") Divider(
-                        color: Colors.white38,
-                        thickness: 1,
-                        height: divHeight),
-                    Padding(
-                        padding: EdgeInsets.only(
-                            left: 10, top: 0, bottom: 10),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            Icon(Icons.forest, color: Colors.white,
-                              size: 22,),
-                            Text(' 휴식 시간',
-                              style: TextStyle(
-                                fontSize: 17, color: Colors.white,),
-                              textAlign: TextAlign.center,),
-                          ],
-                        )
-                    ),
-                    SizedBox(height: 4),
-                    SizedBox(
-                      height: 45,
-                      child: ListView.builder(
-                        key: _restTimeListKey,
-                        controller: _scrollController,
-                        scrollDirection: Axis.horizontal,
-                        padding: EdgeInsets.only(left: 20),
-                        itemCount: _restTimeRef.length,
-                        itemExtent: 90,
-                        itemBuilder: (BuildContext context, int index) {
-                          return Padding(
-                            padding: const EdgeInsets.only(right: 8.0),
-                            child: TimeButton(
-                                borderColor: Colors.white38,
-                                activeBorderColor: Colors.white,
-                                backgroundColor: Color(0xFF333A47),
-                                activeBackgroundColor: Color(
-                                    0xFF333A47),
-                                textStyle: TextStyle(
-                                    fontWeight: FontWeight.normal,
-                                    color: Colors.white38),
-                                activeTextStyle: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white),
-                                time: _restTimeRef[index].toString() +
-                                    ' 시간',
-                                value: _selectedRestHour ==
-                                    _restTimeRef[index],
-                                onSelect: (_) =>
-                                    setState(() {
-                                      _selectRestHour(
-                                          index, _restTimeRef[index]);
-                                      //_getDurationTime(_selectedDate);
-                                    })
-                            ),
-                          );
-                        },
-
-                      ),
-                    ),
-                    SizedBox(height: 4),
-                    Divider(color: Colors.white38,
-                        thickness: 1,
-                        height: divHeight),
-                    Padding(
-                        padding: EdgeInsets.only(
-                            left: 10, top: 0, bottom: 10),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            Container(
-                              padding: EdgeInsets.only(top: 4),
-                              child: Icon(Icons.attach_money,
-                                color: Colors.white, size: 25,),
-                            ),
-                            Text(' 지출 내역',
-                              style: TextStyle(
-                                  fontSize: 17, color: Colors.white),
-                              textAlign: TextAlign.center,),
-                          ],
-                        )
-                    ),
-                    _buildExpenseList(),
-                    SizedBox(height: 4),
-                    Divider(color: Colors.white38,
-                        thickness: 1,
-                        height: divHeight),
-                    if(_checkList.length > 0) _buildChecklist(),
-                    if(_checkList.length > 0) SizedBox(height: 4),
-                    if(_checkList.length > 0) Divider(color: Colors.white38,
-                        thickness: 1,
-                        height: divHeight),
-                    Padding(
-                        padding: EdgeInsets.only(
-                            left: 10, top: 0, bottom: 10),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            Container(
-                              padding: EdgeInsets.only(top: 4),
-                              child: Icon(Icons.note_alt_outlined,
-                                color: Colors.white, size: 25,),
-                            ),
-                            Text(' 업무 일지',
-                              style: TextStyle(
-                                  fontSize: 17, color: Colors.white),
-                              textAlign: TextAlign.center,),
-                          ],
-                        )
-                    ),
-                    Container(
-                        margin: EdgeInsets.fromLTRB(20, 5, 20, 0),
-                        padding: EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: Color(0xFF333A47),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                              color: Colors.white70
-                          ),
-                        ),
-                        child: Column(
-                          children: [
-                            Container(
-                              padding: EdgeInsets.fromLTRB(0, 0, 0, 10),
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                _getWorkDiaryHdr(), style: TextStyle(
-                                fontSize: 15,
-                                color: Colors.blueAccent[100],),),
-                            ),
-                            SingleChildScrollView(
-                              scrollDirection: Axis.vertical,
-                              child:
-                              TextFormField(
-                                decoration: InputDecoration(
-                                  enabledBorder: UnderlineInputBorder(
-                                    borderSide: BorderSide(
-                                        color: Colors.white70),
-                                  ),
-                                  focusedBorder: UnderlineInputBorder(
-                                    borderSide: BorderSide(
-                                        color: Colors.white70),
+                                          ),
+                                          onPressed: () {
+                                            setState(() {
+                                              if (_selectFromTo == "from") {
+                                                _selectFromTo = "";
+                                              }
+                                              else {
+                                                _selectFromTo = "from";
+                                                _timeStreamCon.add(
+                                                    convertTimeToDateTime(
+                                                        _selectedTimeFrom));
+                                              }
+                                            });
+                                          },
+                                          child: Text(_selectedTimeFrom != null
+                                              ? (_selectedTimeFrom!.format(context))
+                                              : TimeOfDay(hour: TimeOfDay
+                                              .now()
+                                              .hour, minute: (TimeOfDay
+                                              .now()
+                                              .minute / 30).floor() * 30).format(
+                                              context),
+                                            style: TextStyle(color: Colors.white,
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 20),
+                                          )
+                                      ),
+                                      Icon(Icons.arrow_forward,
+                                        color: Colors.white38,),
+                                      TextButton(
+                                          style: ButtonStyle(
+                                            overlayColor: MaterialStateColor
+                                                .resolveWith((states) =>
+                                            Colors.white38),
+                                            backgroundColor: MaterialStateColor
+                                                .resolveWith((states) =>
+                                            _selectFromTo == "to"
+                                                ? Colors.white38
+                                                : Colors.transparent),
+                                          ),
+                                          onPressed: () {
+                                            setState(() {
+                                              if (_selectFromTo == "to") {
+                                                _selectFromTo = "";
+                                              }
+                                              else {
+                                                _selectFromTo = "to";
+                                                _timeStreamCon.add(
+                                                    convertTimeToDateTime(
+                                                        _selectedTimeTo));
+                                              }
+                                            });
+                                          },
+                                          child: Text(_selectedTimeTo != null
+                                              ? (_selectedTimeTo!.format(context))
+                                              : TimeOfDay(hour: TimeOfDay
+                                              .now()
+                                              .hour, minute: (TimeOfDay
+                                              .now()
+                                              .minute / 30).floor() * 30).format(
+                                              context),
+                                            style: TextStyle(color: Colors.white,
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 20),
+                                          )
+                                      ),
+                                    ],
                                   ),
                                 ),
-                                controller: _inputController,
-                                keyboardType: TextInputType.multiline,
-                                maxLines: null,
-                                autofocus: false,
-                                style: TextStyle(
-                                    fontSize: 15, color: Colors
-                                    .white70),
 
-                                focusNode: _diaryFocusNode,
-                                onChanged: (text) {
-                                  if (_diaryChanged == false) {
-                                    setState(() {
-                                      _diaryChanged = true;
-                                    });
-                                  }
-                                },
-                              ),
-                            ),
-                          ],
-                        )
-                    ),
-                    SizedBox(height: 8),
-                    Container(height: 40,),
-                  ],
-                )
-                ),
+                                Divider(color: Colors.white38,
+                                    thickness: 1,
+                                    height: divHeight),
+                                AnimatedContainer(
+                                  height: _selectFromTo == "from" ? 150 : 0,
+                                  duration: Duration(milliseconds: 300),
+                                  onEnd: () {
+                                    _updateSelectedRestHour();
+                                  },
+                                  child: Container(
+                                    height: 150,
+                                    child: (_selectFromTo == "from") ? getTimeSlider(_selectedTimeFrom) : Container(),
+                                  ),
+                                ),
+                                AnimatedContainer(
+                                  height: _selectFromTo == "to" ? 150 : 0,
+                                  duration: Duration(milliseconds: 300),
+                                  onEnd: () {
+                                    _updateSelectedRestHour();
+                                  },
+                                  child: Container(
+                                    height: 150,
+                                    child: (_selectFromTo == "to") ? getTimeSlider(_selectedTimeTo) : Container(),
+                                  ),
+                                ),
+                                if(_selectFromTo != "") Divider(
+                                    color: Colors.white38,
+                                    thickness: 1,
+                                    height: divHeight),
+                                Padding(
+                                    padding: EdgeInsets.only(
+                                        left: 10, top: 0, bottom: 10),
+                                    child: Row(
+                                      crossAxisAlignment: CrossAxisAlignment.center,
+                                      children: [
+                                        Icon(Icons.forest, color: Colors.white,
+                                          size: 22,),
+                                        Text(' 휴식 시간',
+                                          style: TextStyle(
+                                            fontSize: 17, color: Colors.white,),
+                                          textAlign: TextAlign.center,),
+                                      ],
+                                    )
+                                ),
+                                SizedBox(height: 4),
+                                SizedBox(
+                                  height: 45,
+                                  child: ListView.builder(
+                                    key: _restTimeListKey,
+                                    controller: _scrollController,
+                                    scrollDirection: Axis.horizontal,
+                                    padding: EdgeInsets.only(left: 20),
+                                    itemCount: _restTimeRef.length,
+                                    itemExtent: 90,
+                                    itemBuilder: (BuildContext context, int index) {
+                                      return Padding(
+                                        padding: const EdgeInsets.only(right: 8.0),
+                                        child: TimeButton(
+                                            borderColor: Colors.white38,
+                                            activeBorderColor: Colors.white,
+                                            backgroundColor: Color(0xFF333A47),
+                                            activeBackgroundColor: Color(
+                                                0xFF333A47),
+                                            textStyle: TextStyle(
+                                                fontWeight: FontWeight.normal,
+                                                color: Colors.white38),
+                                            activeTextStyle: TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                color: Colors.white),
+                                            time: _restTimeRef[index].toString() +
+                                                ' 시간',
+                                            value: _selectedRestHour ==
+                                                _restTimeRef[index],
+                                            onSelect: (_) =>
+                                                setState(() {
+                                                  _selectRestHour(
+                                                      index, _restTimeRef[index]);
+                                                  //_getDurationTime(_selectedDate);
+                                                })
+                                        ),
+                                      );
+                                    },
 
-                    )
-                  }
+                                  ),
+                                ),
+                                SizedBox(height: 4,),
+                                Divider(color: Colors.white38,
+                                    thickness: 1,
+                                    height: divHeight),
+                                Padding(
+                                    padding: EdgeInsets.only(
+                                        left: 10, top: 0, bottom: 10),
+                                    child: Row(
+                                      crossAxisAlignment: CrossAxisAlignment.center,
+                                      children: [
+                                        Container(
+                                          padding: EdgeInsets.only(top: 4),
+                                          child: Icon(Icons.attach_money,
+                                            color: Colors.white, size: 25,),
+                                        ),
+                                        Text(' 지출 내역',
+                                          style: TextStyle(
+                                              fontSize: 17, color: Colors.white),
+                                          textAlign: TextAlign.center,),
+                                      ],
+                                    )
+                                ),
+                                _buildExpenseList(),
+                                SizedBox(height: 4),
+                                Divider(color: Colors.white38,
+                                    thickness: 1,
+                                    height: divHeight),
+                                _buildChecklist(),
+                                if(curChecked.length > 0) SizedBox(height: 4),
+                                if(curChecked.length > 0) Divider(color: Colors.white38,
+                                    thickness: 1,
+                                    height: divHeight),
+                                Padding(
+                                    padding: EdgeInsets.only(
+                                        left: 10, top: 0, bottom: 10),
+                                    child: Row(
+                                      crossAxisAlignment: CrossAxisAlignment.center,
+                                      children: [
+                                        Container(
+                                          padding: EdgeInsets.only(top: 4),
+                                          child: Icon(Icons.note_alt_outlined,
+                                            color: Colors.white, size: 25,),
+                                        ),
+                                        Text(' 업무 일지',
+                                          style: TextStyle(
+                                              fontSize: 17, color: Colors.white),
+                                          textAlign: TextAlign.center,),
+                                      ],
+                                    )
+                                ),
+                                Container(
+                                    margin: EdgeInsets.fromLTRB(20, 5, 20, 0),
+                                    padding: EdgeInsets.all(10),
+                                    decoration: BoxDecoration(
+                                      color: Color(0xFF333A47),
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(
+                                          color: Colors.white70
+                                      ),
+                                    ),
+                                    child: Column(
+                                      children: [
+                                        Container(
+                                          padding: EdgeInsets.fromLTRB(0, 0, 0, 10),
+                                          alignment: Alignment.centerLeft,
+                                          child: Text(
+                                            _getWorkDiaryHdr(), style: TextStyle(
+                                            fontSize: 15,
+                                            color: Colors.blueAccent[100],),),
+                                        ),
+                                        SingleChildScrollView(
+                                          scrollDirection: Axis.vertical,
+                                          child:
+                                          TextFormField(
+                                            decoration: InputDecoration(
+                                              enabledBorder: UnderlineInputBorder(
+                                                borderSide: BorderSide(
+                                                    color: Colors.white70),
+                                              ),
+                                              focusedBorder: UnderlineInputBorder(
+                                                borderSide: BorderSide(
+                                                    color: Colors.white70),
+                                              ),
+                                            ),
+                                            controller: _inputController,
+                                            keyboardType: TextInputType.multiline,
+                                            maxLines: null,
+                                            autofocus: false,
+                                            style: TextStyle(
+                                                fontSize: 15, color: Colors
+                                                .white70),
+
+                                            focusNode: _diaryFocusNode,
+                                            onChanged: (text) {
+                                              if (_diaryChanged == false) {
+                                                setState(() {
+                                                  _diaryChanged = true;
+                                                });
+                                              }
+                                            },
+                                          ),
+                                        ),
+                                      ],
+                                    )
+                                ),
+                                SizedBox(height: 8),
+                                Divider(color: Colors.white38,
+                                    thickness: 1,
+                                    height: divHeight),
+                                getAdKakaoFit('Attendi-web-userScreen3'),
+                                Divider(color: Colors.white38,
+                                    thickness: 1,
+                                    height: divHeight),
+                              ],
+                            )
+                        ),
+                      )
+
+                  )
                 }
+              }
             ],
           ),
           floatingActionButton: _buildFloatingActionButton(),
-        ),
-
+        )
     );
   }
 
+
+  Color? _getBottomSelectedColor(int index){
+    return _selectedBottomIndex == index ? Colors.redAccent[100] : Colors.white30;
+  }
+
+  void _onBottomItemTapped(int index) {
+    setState(() {
+      _selectedBottomIndex = index;
+    });
+  }
+
   Widget getTimeSlider(TimeOfDay? seltime){
+    TimeOfDay time = seltime ?? TimeOfDay.now();
     return CupertinoTheme(
       data: CupertinoThemeData(brightness: Brightness.dark),
       child: CupertinoDatePicker(
-        initialDateTime: DateTime(DateTime.now().year,DateTime.now().month,DateTime.now().day,seltime!.hour,seltime!.minute),
+        initialDateTime: DateTime(DateTime.now().year,DateTime.now().month,DateTime.now().day,time.hour,time.minute),
         use24hFormat: false,
         mode: CupertinoDatePickerMode.time,
-        minuteInterval: 30,
+        minuteInterval: _minuteInterval,
         onDateTimeChanged: (DateTime date){
           setState(() {
             //_dateTime = time;
@@ -796,12 +863,12 @@ class _TimeLineState extends State<TimeLinePage> {
       _checkList.forEach((element) {
         if(element.writetime.isBefore(_selectedDate) || element.writetime.isAtSameMomentAs(_selectedDate)){
           curCheckTitle.add(element.name);
-          curChecked.add(element.checked[_selectedDate]??false);
+          curChecked.add(element.checked[_selectedDate] == 'false' ? false : true);
         }
       });
     });
 
-    return _checkList.length > 0 ? ListView.separated(
+    return curChecked.length > 0 ? ListView.separated(
         itemCount: curCheckTitle.length + 1,
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
@@ -859,6 +926,7 @@ class _TimeLineState extends State<TimeLinePage> {
         color: Color(0xFF333A47),
         elevation: 5,
         child: AnimatedContainer(
+          color: Colors.black38,
             height: _calendarHeight,
             onEnd: (){
               setState((){
@@ -897,14 +965,14 @@ class _TimeLineState extends State<TimeLinePage> {
                   else if(_calendarFormat == CalendarFormat.twoWeeks){
                     _fillCalendar = false;
                     _calendarFormat = CalendarFormat.week;
-                    _calendarHeight = _calendarRowHeight + 30;
+                    _calendarHeight = 0;
                     _calendarExpandDuration = dur;
                     _updateSelectedRestHour();
                   }
                   else{
                     _fillCalendar = false;
                     _calendarFormat = CalendarFormat.week;
-                    _calendarHeight = _calendarRowHeight + 30;
+                    _calendarHeight = 0;
                     _calendarExpandDuration = (dur / 5).floor();
                     _updateSelectedRestHour();
                   }
@@ -922,35 +990,40 @@ class _TimeLineState extends State<TimeLinePage> {
               onDaySelected: (DateTime selected, DateTime focused){
                 setState(() {
                   if (selected != null) {
+                    if(selected.isBefore(DateTime(DateTime.now().add(Duration(days: 1)).year, DateTime.now().add(Duration(days: 1)).month, DateTime.now().add(Duration(days: 1)).day))){
+                      _selectedDate = DateTime(selected.year, selected.month, selected.day);
+                      _selectedDateDB = DateFormat('yyyy-MM-dd').format(_selectedDate);
+                      _selectedTimeFrom = _startTime[_selectedDate] ?? TimeOfDay(hour: TimeOfDay.now().hour, minute: (TimeOfDay.now().minute / _minuteInterval).floor() * _minuteInterval);
+                      _selectedTimeTo = _endTime[_selectedDate] ?? TimeOfDay(hour: TimeOfDay.now().hour, minute: (TimeOfDay.now().minute / _minuteInterval).floor() * _minuteInterval);
+                      getDailyDataFromUserDoc(_userId, _selectedDateDB);
+                      if (_restTime[_selectedDate] != null) {
+                        _selectedRestHour = _restTime[_selectedDate]!;
+                      }
+                      else {
+                        _selectedRestHour = 0;
+                      }
+                      _inputController.text = _workDiary[_selectedDate] ?? _branchDiaryFormat;
+                      _totalWorkingTime = _updateTotalWorkingTime(_selectedDate);
+                      _diaryFocusNode.unfocus();
+                      _selectFromTo = "";
 
-                    _selectedDate = DateTime(selected.year, selected.month, selected.day);
-                    _selectedDateDB = DateFormat('yyyy-MM-dd').format(_selectedDate);
-                    _selectedTimeFrom = _startTime[_selectedDate] ?? TimeOfDay(hour: TimeOfDay.now().hour, minute: (TimeOfDay.now().minute / 30).floor() * 30);
-                    _selectedTimeTo = _endTime[_selectedDate] ?? TimeOfDay(hour: TimeOfDay.now().hour, minute: (TimeOfDay.now().minute / 30).floor() * 30);
-                    getDailyDataFromUserDoc(_userId, _selectedDateDB);
-                    if (_restTime[_selectedDate] != null) {
-                      _selectedRestHour = _restTime[_selectedDate]!;
-                    }
-                    else {
-                      _selectedRestHour = 0;
-                    }
-                    _inputController.text = _workDiary[_selectedDate] ?? _branchDiaryFormat;
-                    _totalWorkingTime = _updateTotalWorkingTime(_selectedDate);
-                    _diaryFocusNode.unfocus();
-                    _selectFromTo = "";
+                      if(_calendarFormat == CalendarFormat.week){
+                        _updateSelectedRestHour();
+                      }
 
-                    if(_calendarFormat == CalendarFormat.week){
-                      _updateSelectedRestHour();
+                      if(isSameDay(_focusDay,focused) && _calendarFormat == CalendarFormat.month){
+                        //_calendarFormat = CalendarFormat.twoWeeks;
+                        //_fillCalendar = false;
+                        _calendarExpand = false;
+                        _calendarHeight -= 1;
+                        _calendarExpandDuration = 10;
+                      }
+                      _focusDay = DateTime(focused.year, focused.month, focused.day);
                     }
-
-                    if(isSameDay(_focusDay,focused) && _calendarFormat == CalendarFormat.month){
-                      //_calendarFormat = CalendarFormat.twoWeeks;
-                      //_fillCalendar = false;
-                      _calendarExpand = false;
-                      _calendarHeight -= 1;
-                      _calendarExpandDuration = 10;
+                    else{
+                      print(DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().add(Duration(days: 1)).day));
+                      Fluttertoast.showToast(msg: '미래의 업무는 입력할 수 없어요!');
                     }
-                    _focusDay = DateTime(focused.year, focused.month, focused.day);
                   }
                   selectCnt++;
                 });
@@ -959,15 +1032,16 @@ class _TimeLineState extends State<TimeLinePage> {
                 titleTextFormatter: (DateTime date, _){
                   String titleText = "";
                   if(date.year == DateTime.now().year){
-                    titleText = date.month.toString() + '월 ( ' + _totalWorkingTime.toString() + '시간 근무 )';
+                    titleText = date.month.toString() + '월 - [ ' + _totalWorkingTime.toString() + '시간 ]';
                   }
                   else{
-                    titleText = date.year.toString() + '년 ' + date.month.toString() + '월 ( ' + _totalWorkingTime.toString() + '시간 근무 )';
+                    titleText = date.year.toString() + '년 ' + date.month.toString() + '월 [ ' + _totalWorkingTime.toString() + '시간 근무 ]';
                   }
                   return titleText;
                 },
+
                 titleCentered: true,
-                titleTextStyle: TextStyle(color: Colors.white, fontSize: 18,),
+                titleTextStyle: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20,),
                 formatButtonDecoration: BoxDecoration(border: Border.all(color: Colors.white70,style: BorderStyle.solid),borderRadius: BorderRadius.circular(10)),
                 formatButtonTextStyle: TextStyle(fontSize: 13, color: Colors.white70, ),
                 //rightChevronVisible: false,
@@ -975,7 +1049,7 @@ class _TimeLineState extends State<TimeLinePage> {
                 rightChevronIcon: Icon(Icons.arrow_forward_ios_rounded, size: 15, color: Colors.white70,),
                 leftChevronIcon:  Icon(Icons.arrow_back_ios_new_rounded, size: 15,color: Colors.white70),
                 formatButtonVisible: !_fillCalendar,
-                headerPadding: EdgeInsets.only(top: 5, bottom: 5),
+                headerPadding: EdgeInsets.only(top: 5, bottom: 10),
 
               ),
               daysOfWeekStyle: DaysOfWeekStyle(
@@ -1009,8 +1083,8 @@ class _TimeLineState extends State<TimeLinePage> {
                     _focusDay = DateTime(date.year, date.month, date.day);
                     _selectedDate = DateTime(date.year, date.month, date.day);
                     _selectedDateDB = DateFormat('yyyy-MM-dd').format(_selectedDate);
-                    _selectedTimeFrom = _startTime[_selectedDate] ?? TimeOfDay(hour: TimeOfDay.now().hour, minute: (TimeOfDay.now().minute / 30).floor() * 30);
-                    _selectedTimeTo = _endTime[_selectedDate] ?? TimeOfDay(hour: TimeOfDay.now().hour, minute: (TimeOfDay.now().minute / 30).floor() * 30);
+                    _selectedTimeFrom = _startTime[_selectedDate] ?? TimeOfDay(hour: TimeOfDay.now().hour, minute: (TimeOfDay.now().minute / _minuteInterval).floor() * _minuteInterval);
+                    _selectedTimeTo = _endTime[_selectedDate] ?? TimeOfDay(hour: TimeOfDay.now().hour, minute: (TimeOfDay.now().minute / _minuteInterval).floor() * _minuteInterval);
                     getDailyDataFromUserDoc(_userId, _selectedDateDB);
                     if (_restTime[_selectedDate] != null) {
                       _selectedRestHour = _restTime[_selectedDate]!;
@@ -1036,8 +1110,8 @@ class _TimeLineState extends State<TimeLinePage> {
                 cellPadding: EdgeInsets.all(3),
                 cellMargin: EdgeInsets.zero,
                 weekendTextStyle: TextStyle(color: Colors.redAccent[100], fontSize: _dayCharSize),
-                todayTextStyle: TextStyle(color: Colors.blueAccent[100], fontSize: _dayCharSize, fontWeight: FontWeight.bold),
-                selectedTextStyle: TextStyle(color: isSameDay(_selectedDate, DateTime.now()) ? Colors.blueAccent : Colors.white, fontWeight: FontWeight.bold, fontSize: _dayCharSize),
+                todayTextStyle: TextStyle(color: Colors.blue, fontSize: _dayCharSize, fontWeight: FontWeight.bold, decoration: TextDecoration.underline),
+                selectedTextStyle: TextStyle(color: isSameDay(_selectedDate, DateTime.now()) ? Colors.blue : Colors.white, fontWeight: FontWeight.bold, fontSize: _dayCharSize, decoration: isSameDay(_selectedDate, DateTime.now()) ? TextDecoration.underline : null),
                 defaultTextStyle: TextStyle(color: Colors.white, fontSize: _dayCharSize),
                 selectedDecoration: BoxDecoration(shape: BoxShape.rectangle, borderRadius: BorderRadius.circular(5), color: Colors.black26,
                     border: Border.all(color: Colors.teal[200]!,style: BorderStyle.solid, width: 2)),
@@ -1053,7 +1127,8 @@ class _TimeLineState extends State<TimeLinePage> {
               daysOfWeekHeight: 30,
               formatAnimationDuration: const Duration(microseconds: 300),
               locale: 'ko-KR',
-              headerVisible: _fillCalendar,
+              headerVisible: false,// _fillCalendar,
+
             )
         )
       )
@@ -1088,9 +1163,8 @@ class _TimeLineState extends State<TimeLinePage> {
     var curCheckListcnt = 0;
 
     _checkList.forEach((element) {
-      if(element.checked[day]??false){
+      if(element.checked[day] != null && element.checked[day] != 'false'){
         curCheckListcnt++;
-
       }
       else if(day.isBefore(element.writetime)){
 
@@ -1113,7 +1187,7 @@ class _TimeLineState extends State<TimeLinePage> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   if(_durationTime[day] != null) buildCalendarDayMarker(
-                    text: '근무 ' +  _durationTime[day]!.toStringAsFixed(1), color: Colors.teal[400]!,
+                    text: '근무 ' +  _durationTime[day].toString(), color: Colors.teal[400]!,
                   ),
                   if(_startTime[day] != null) buildCalendarDayMarker(
                     text: _startTime[day]!.format(context), color: Colors.blueAccent[100]!,
@@ -1233,8 +1307,15 @@ class _TimeLineState extends State<TimeLinePage> {
                 }
               }
               if(key == 'noticeShow'){
-                if(value != null && value.length > 0 && value == 'false'){
-                  noticeShow = false;
+                if(value != null && value.length > 0){
+                  DateTime date = DateFormat('yyyy-MM-dd').parse(value);
+                  //date = date.subtract(Duration(days: 6));
+                  if(date.isBefore(DateTime.now().subtract(Duration(days: 1)))){
+                    noticeShow = true;
+                  }
+                  else{
+                    noticeShow = false;
+                  }
                 }
               }
             });
@@ -1242,13 +1323,26 @@ class _TimeLineState extends State<TimeLinePage> {
         }
       });
 
-      if(_branchNotice.length > 0 && noticeShow){
+      if(noticeShow){
         showDialog<String>(
           context: context,
           builder: (BuildContext context) => AlertDialog(
+            contentPadding: EdgeInsets.all(5),
             backgroundColor: Color(0xFF333A47),
-            title: const Text('공지사항', style: TextStyle(fontSize: 15, color: Colors.white)),
-            content: Text(_branchNotice,style: TextStyle(color: Colors.white70), textAlign: TextAlign.left,),
+            title: Text(_branchNotice.length > 0 ? '공지사항' : '광고', style: TextStyle(fontSize: 15, color: Colors.white)),
+            content: Container(
+              margin: EdgeInsets.all(5),
+
+                constraints : BoxConstraints(maxHeight: 400),
+                child: SingleChildScrollView(
+                    child: Column(
+                      children: [
+                        getAdKakaoFit('Attendi-web-userScreen4'),
+                        if(_branchNotice.length > 0) Text(_branchNotice,style: TextStyle(color: Colors.white70), textAlign: TextAlign.left,),
+                      ],
+                    )
+                )
+        ),
             actions: <Widget>[
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1256,20 +1350,21 @@ class _TimeLineState extends State<TimeLinePage> {
                   TextButton(
                     onPressed: () {
                       Navigator.pop(context, 'Do not show again');
-                      UserDatabase.addUserItem(companyId: widget.companyId,userUid: _userId, key: 'noticeShow', value: 'false');
+                      UserDatabase.addUserItem(companyId: widget.companyId,userUid: _userId, key: 'noticeShow', value: DateTime.now().toString());
                     },
-                    child: Text('Do not show again', style: TextStyle(color: Colors.redAccent[100]),),
+                    child: Text('1일간 열지않기', style: TextStyle(color: Colors.grey),),
                   ),
                   TextButton(
                     onPressed: () {
                       Navigator.pop(context, 'Cancel');
                     },
-                    child: const Text('Close'),
+                    child: const Text('닫기'),
                   ),
                 ],
               )
             ],
-          ),);
+          )
+        );
       }
 
     });
@@ -1282,48 +1377,54 @@ class _TimeLineState extends State<TimeLinePage> {
         String id = doc.id;
         DateTime date = DateFormat('yyyy-MM-dd').parse(id);
         if (date != null) {
-          setState(() {
-            dateInfo.forEach((key, value) {
-              if (key == 'start') {
-                if (value != null && value.length > 0) {
-                  _startTime[date] = stringToTimeOfDay(value);
+          if(date.isBefore(DateTime.now().subtract(Duration(days:100)))){
+            //print('Data deleted! user : $userId , date : $date');
+            //UserDatabase.deleteDoc(companyId: widget.companyId, userUid: userId, date: id).then((value) => print('Data deleted! user : $userId , date : $date'));
+          }
+          else{
+            setState(() {
+              dateInfo.forEach((key, value) {
+                if (key == 'start') {
+                  if (value != null && value.length > 0) {
+                    _startTime[date] = stringToTimeOfDay(value);
+                  }
                 }
-              }
-              else if (key == 'end') {
-                if (value != null && value.length > 0) {
-                  _endTime[date] = stringToTimeOfDay(value);
+                else if (key == 'end') {
+                  if (value != null && value.length > 0) {
+                    _endTime[date] = stringToTimeOfDay(value);
+                  }
                 }
-              }
-              else if (key == 'duration') {
-                if (value != null && value.length > 0) {
-                  _durationTime[date] = double.parse(value);
-                  _rangeMap[date] = _durationTime[date].toString();
+                else if (key == 'duration') {
+                  if (value != null && value.length > 0) {
+                    _durationTime[date] = double.parse(value);
+                    _rangeMap[date] = _durationTime[date].toString();
+                  }
                 }
-              }
-              else if (key == 'rest') {
-                if (value != null && value.length > 0) {
-                  _restTime[date] = double.parse(value);
+                else if (key == 'rest') {
+                  if (value != null && value.length > 0) {
+                    _restTime[date] = double.parse(value);
+                  }
                 }
-              }
-              else if (key == 'text') {
-                if (value != null && value.length > 0) {
-                  _workDiary[date] = value;
-                }
+                else if (key == 'text') {
+                  if (value != null && value.length > 0) {
+                    _workDiary[date] = value;
+                  }
 
-                _inputController.text = _workDiary[_selectedDate]??_branchDiaryFormat;
+                  _inputController.text = _workDiary[_selectedDate]??_branchDiaryFormat;
+                }
+              });
+              _totalWorkingTime = _updateTotalWorkingTime(_selectedDate);
+              _selectedRestHour = _restTime[_selectedDate] ?? 0;
+
+              _selectedTimeFrom = _startTime[_selectedDate] ?? TimeOfDay(hour: TimeOfDay.now().hour, minute: (TimeOfDay.now().minute / _minuteInterval).floor() * _minuteInterval);
+              _selectedTimeTo = _endTime[_selectedDate] ?? TimeOfDay(hour: TimeOfDay.now().hour, minute: (TimeOfDay.now().minute / _minuteInterval).floor() * _minuteInterval);
+
+              if (_restTime[_selectedDate] != null) {
+                //_updateSelectedRestHour();
               }
+              _updateRestTimeRef(_selectedDate);
             });
-            _totalWorkingTime = _updateTotalWorkingTime(_selectedDate);
-            _selectedRestHour = _restTime[_selectedDate] ?? 0;
-
-            _selectedTimeFrom = _startTime[_selectedDate] ?? TimeOfDay(hour: TimeOfDay.now().hour, minute: (TimeOfDay.now().minute / 30).floor() * 30);
-            _selectedTimeTo = _endTime[_selectedDate] ?? TimeOfDay(hour: TimeOfDay.now().hour, minute: (TimeOfDay.now().minute / 30).floor() * 30);
-
-            if (_restTime[_selectedDate] != null) {
-              //_updateSelectedRestHour();
-            }
-            _updateRestTimeRef(_selectedDate);
-          });
+          }
         }
       });
     });
@@ -1477,183 +1578,197 @@ class _TimeLineState extends State<TimeLinePage> {
               width: 80,
               alignment: Alignment.center,
               child:
-              FloatingActionButton.extended(
-                elevation: 5,
-                backgroundColor: Colors.blue[300],
-                icon: Icon(Icons.undo, color: Colors.white,),
-                label: Text('취소', style: TextStyle(color: Colors.white70)),
-                extendedIconLabelSpacing: 5,
-                onPressed: (){
-                  setState((){
-                    //_fillCalendar = true;
-                    //_calendarFormat = CalendarFormat.month;
-                    _calendarExpand = true;
-                    _calendarHeight += 1;
-                    _calendarExpandDuration = 10;
-                  });
-                },
-              ),
+                  WebViewAware(
+                    child: FloatingActionButton.extended(
+                      elevation: 5,
+                      backgroundColor: Colors.blue[300],
+                      icon: Icon(Icons.undo, color: Colors.white,),
+                      label: Text('취소', style: TextStyle(color: Colors.white70)),
+                      extendedIconLabelSpacing: 5,
+                      onPressed: (){
+                        setState((){
+                          //_fillCalendar = true;
+                          //_calendarFormat = CalendarFormat.month;
+                          _calendarExpand = true;
+                          _calendarHeight += 1;
+                          _calendarExpandDuration = 10;
+                        });
+                      },
+                    ),
+                  ),
             ),
             Container(
               height: 40,
               width: 80,
               alignment: Alignment.center,
-              child:
-              FloatingActionButton.extended(
-                elevation: 5,
-                backgroundColor: Colors.redAccent[100],
-                icon: Icon(Icons.save, color: Colors.white,),
-                label: Text('저장', style: TextStyle(color: Colors.white70)),
-                extendedIconLabelSpacing: 5,
-                onPressed: () async{
-                  bool changed = false;
-                  List<ExpenseItem> tempExpense = [];
-                  for(int i = 0; i < _listExpense.length; i++){
-                    if(_listExpense[i].type != null && _listExpense[i].type!.length > 0){
-                      if(_listExpense[i].money != null && _listExpense[i].money!.length > 0){
-
-                      }
-                      else{
-                        Fluttertoast.showToast(msg: '지출 내역 오류! 지출 금액을 입력하세요.', timeInSecForIosWeb: 2, webPosition: "center", backgroundColor: Colors.redAccent,);
-                        return;
-                      }
-                    }
-
-                    if(_listExpense[i].detail != null && _listExpense[i].detail!.length > 0){
-                      if(_listExpense[i].money != null && _listExpense[i].money!.length > 0){
-
-                      }
-                      else{
-                        Fluttertoast.showToast(msg: '지출 내역 오류! 지출 금액을 입력하세요.', timeInSecForIosWeb: 2, webPosition: "center", backgroundColor: Colors.redAccent,);
-                        return;
-                      }
-                    }
-
-                    if(_listExpense[i].money != null && _listExpense[i].money!.length > 0){
+              child: WebViewAware(
+                child: FloatingActionButton.extended(
+                  elevation: 5,
+                  backgroundColor: Colors.redAccent[100],
+                  icon: Icon(Icons.save, color: Colors.white,),
+                  label: Text('저장', style: TextStyle(color: Colors.white70)),
+                  extendedIconLabelSpacing: 5,
+                  onPressed: () async{
+                    bool changed = false;
+                    List<ExpenseItem> tempExpense = [];
+                    for(int i = 0; i < _listExpense.length; i++){
                       if(_listExpense[i].type != null && _listExpense[i].type!.length > 0){
-                        tempExpense.add(_listExpense[i]);
+                        if(_listExpense[i].money != null && _listExpense[i].money!.length > 0){
+
+                        }
+                        else{
+                          Fluttertoast.showToast(msg: '지출 내역 오류! 지출 금액을 입력하세요.', timeInSecForIosWeb: 2, webPosition: "center", backgroundColor: Colors.redAccent,);
+                          return;
+                        }
                       }
-                      else{
-                        Fluttertoast.showToast(msg: '지출 내역 오류! 지출 유형을 선택하세요.', timeInSecForIosWeb: 2, webPosition: "center", backgroundColor: Colors.redAccent,);
-                        return;
+
+                      if(_listExpense[i].detail != null && _listExpense[i].detail!.length > 0){
+                        if(_listExpense[i].money != null && _listExpense[i].money!.length > 0){
+
+                        }
+                        else{
+                          Fluttertoast.showToast(msg: '지출 내역 오류! 지출 금액을 입력하세요.', timeInSecForIosWeb: 2, webPosition: "center", backgroundColor: Colors.redAccent,);
+                          return;
+                        }
+                      }
+
+                      if(_listExpense[i].money != null && _listExpense[i].money!.length > 0){
+                        if(_listExpense[i].type != null && _listExpense[i].type!.length > 0){
+                          tempExpense.add(_listExpense[i]);
+                        }
+                        else{
+                          Fluttertoast.showToast(msg: '지출 내역 오류! 지출 유형을 선택하세요.', timeInSecForIosWeb: 2, webPosition: "center", backgroundColor: Colors.redAccent,);
+                          return;
+                        }
                       }
                     }
-                  }
 
+                    int curIdx = 0;
+                    for(int i = 0; i < _checkList.length; i++){
+                      if(_checkList[i].writetime.isBefore(_selectedDate) || _checkList[i].writetime.isAtSameMomentAs(_selectedDate)){
+                        if(curChecked[curIdx] != null){
+                          setState((){
+                            if(curChecked[curIdx++]!){
+                              if(_checkList[i].checked[_selectedDate] == 'false'){
+                                _checkList[i].checked[_selectedDate] = widget.user;
+                              }
+                            }
+                            else{
+                              _checkList[i].checked[_selectedDate] = 'false';
+                            }
 
+                          });
+                          BranchDatabase.addCheckItem(companyId: widget.companyId, branch: widget.workplace
+                              , checkId: i, key: _selectedDateDB, value: (_checkList[i].checked[_selectedDate]??'false'));
+                        }
+                      }
+                    }
+                    for(int i = 0; i < _listExpenseOrg.length; i++){
+                      await UserDatabase.deleteExpenseDoc(companyId: widget.companyId, userUid: _userId,
+                          date: _selectedDateDB, expenseId: i);
+                    }
+                    for(int i = 0; i < tempExpense.length; i++){
+                      if(tempExpense[i].type != null && tempExpense[i].type!.length > 0){
+                        UserDatabase.addUserDateExpenseItem(
+                            companyId: widget.companyId,
+                            userUid: _userId,
+                            date: _selectedDateDB,
+                            expenseId: i,
+                            key: "type",
+                            value: tempExpense[i].type!);
+                      }
+                      if(tempExpense[i].money != null && tempExpense[i].money!.length > 0){
+                        UserDatabase.addUserDateExpenseItem(
+                            companyId: widget.companyId,
+                            userUid: _userId,
+                            date: _selectedDateDB,
+                            expenseId: i,
+                            key: "money",
+                            value: tempExpense[i].money!);
+                      }
+                      if(tempExpense[i].detail != null && tempExpense[i].detail!.length > 0){
+                        UserDatabase.addUserDateExpenseItem(
+                            companyId: widget.companyId,
+                            userUid: _userId,
+                            date: _selectedDateDB,
+                            expenseId: i,
+                            key: "detail",
+                            value: tempExpense[i].detail!);
+                      }
+                    }
 
-                  for(int i = 0; i < _checkList.length; i++){
-                    if(curChecked[i] != null){
+                    if(_inputController.text != _branchDiaryFormat){
                       setState((){
-                        _checkList[i].checked[_selectedDate] = curChecked[i]!;
+                        _workDiary[_selectedDate] = _inputController.text;
                       });
-                      BranchDatabase.addCheckItem(companyId: widget.companyId, branch: widget.workplace
-                          , checkId: i, key: _selectedDateDB, value: (curChecked[i]!?"true":"false"));
+
+                      if(_workDiary[_selectedDate] != null && _workDiary[_selectedDate]!.length > 0) {
+                        UserDatabase.addUserDateItem(
+                            companyId: widget.companyId,
+                            userUid: _userId,
+                            date: _selectedDateDB,
+                            key: "text",
+                            value: _workDiary[_selectedDate]!);
+                        changed = true;
+                      }
                     }
-                  }
-                  for(int i = 0; i < _listExpenseOrg.length; i++){
-                    await UserDatabase.deleteExpenseDoc(companyId: widget.companyId, userUid: _userId,
-                        date: _selectedDateDB, expenseId: i);
-                  }
-                  for(int i = 0; i < tempExpense.length; i++){
-                    if(tempExpense[i].type != null && tempExpense[i].type!.length > 0){
-                      UserDatabase.addUserDateExpenseItem(
-                          companyId: widget.companyId,
-                          userUid: _userId,
-                          date: _selectedDateDB,
-                          expenseId: i,
-                          key: "type",
-                          value: tempExpense[i].type!);
-                    }
-                    if(tempExpense[i].money != null && tempExpense[i].money!.length > 0){
-                      UserDatabase.addUserDateExpenseItem(
-                          companyId: widget.companyId,
-                          userUid: _userId,
-                          date: _selectedDateDB,
-                          expenseId: i,
-                          key: "money",
-                          value: tempExpense[i].money!);
-                    }
-                    if(tempExpense[i].detail != null && tempExpense[i].detail!.length > 0){
-                      UserDatabase.addUserDateExpenseItem(
-                          companyId: widget.companyId,
-                          userUid: _userId,
-                          date: _selectedDateDB,
-                          expenseId: i,
-                          key: "detail",
-                          value: tempExpense[i].detail!);
-                    }
-                  }
 
-                  setState((){
-                    _workDiary[_selectedDate] = _inputController.text;
-                  });
-
-                  if(_workDiary[_selectedDate] != null && _workDiary[_selectedDate]!.length > 0) {
-                    UserDatabase.addUserDateItem(
-                        companyId: widget.companyId,
-                        userUid: _userId,
-                        date: _selectedDateDB,
-                        key: "text",
-                        value: _workDiary[_selectedDate]!);
-                    changed = true;
-                  }
-
-
-                  if (_selectedTimeFrom != null && _selectedTimeTo != null) {
-                    setState((){
-                      _startTime[_selectedDate] = _selectedTimeFrom!;
-                      _endTime[_selectedDate] = _selectedTimeTo!;
-                    });
-                    UserDatabase.addUserDateItem(companyId: widget.companyId,
-                        userUid: _userId,
-                        date: _selectedDateDB,
-                        key: "start",
-                        value: _selectedTimeFrom!.format(context));
-
-
-                    UserDatabase.addUserDateItem(companyId: widget.companyId,
-                        userUid: _userId,
-                        date: _selectedDateDB,
-                        key: "end",
-                        value: _selectedTimeTo!.format(context));
-
-                    if(_selectedRestHour != null && _selectedRestHour >= 0){
+                    if (_selectedTimeFrom != null && _selectedTimeTo != null) {
                       setState((){
-                        _restTime[_selectedDate] = _selectedRestHour;
+                        _startTime[_selectedDate] = _selectedTimeFrom!;
+                        _endTime[_selectedDate] = _selectedTimeTo!;
                       });
+                      UserDatabase.addUserDateItem(companyId: widget.companyId,
+                          userUid: _userId,
+                          date: _selectedDateDB,
+                          key: "start",
+                          value: _selectedTimeFrom!.format(context));
+
 
                       UserDatabase.addUserDateItem(companyId: widget.companyId,
                           userUid: _userId,
                           date: _selectedDateDB,
-                          key: "rest",
-                          value: _selectedRestHour.toString());
+                          key: "end",
+                          value: _selectedTimeTo!.format(context));
+
+                      if(_selectedRestHour != null && _selectedRestHour >= 0){
+                        setState((){
+                          _restTime[_selectedDate] = _selectedRestHour;
+                        });
+
+                        UserDatabase.addUserDateItem(companyId: widget.companyId,
+                            userUid: _userId,
+                            date: _selectedDateDB,
+                            key: "rest",
+                            value: _selectedRestHour.toString());
+                      }
+                      changed = true;
                     }
-                    changed = true;
-                  }
-                  _getDurationTime(_selectedDate);
+                    _getDurationTime(_selectedDate);
 
-                  //_fillCalendar = true;
-                  //_calendarFormat = CalendarFormat.month;
-                  if(changed){
-                    setState((){
-                      _calendarExpand = true;
-                      _calendarHeight += 1;
-                      _calendarExpandDuration = 10;
-                    });
+                    //_fillCalendar = true;
+                    //_calendarFormat = CalendarFormat.month;
+                    if(changed){
+                      setState((){
+                        _calendarExpand = true;
+                        _calendarHeight += 1;
+                        _calendarExpandDuration = 10;
+                      });
 
-                    Fluttertoast.showToast(msg: '근무기록이 저장되었습니다.', timeInSecForIosWeb: 2, webPosition: "center");
-                  }
-                  else{
-                    Fluttertoast.showToast(msg: '근무기록 오류! 근무 시간을 확인하세요', timeInSecForIosWeb: 2, webPosition: "center", backgroundColor: Colors.redAccent,);
-                  }
-                },
-              ),),
+                      Fluttertoast.showToast(msg: '근무기록이 저장되었습니다.', timeInSecForIosWeb: 2, webPosition: "center");
+                    }
+                    else{
+                      Fluttertoast.showToast(msg: '근무기록 오류! 근무 시간을 확인하세요', timeInSecForIosWeb: 2, webPosition: "center", backgroundColor: Colors.redAccent,);
+                    }
+                  },
+                ),),
+            )
           ],
         );
     }
     else{
       return  SpeedDial(
+        overlayOpacity: 0,
         elevation: 5,
         buttonSize: Size(40,40),
         childrenButtonSize: Size(40,40),
@@ -1668,12 +1783,11 @@ class _TimeLineState extends State<TimeLinePage> {
         children: [
           SpeedDialChild(
               labelShadow: [BoxShadow(color: Colors.black12), BoxShadow(color: Colors.black12)],
-              foregroundColor: Colors.white,
               backgroundColor: Colors.redAccent[100],
-              labelBackgroundColor: Colors.black38,
+              labelBackgroundColor: Colors.blueGrey,
               child: Icon(Icons.delete_outline, color: Colors.white),
               label: '근무기록 삭제',
-              labelStyle: TextStyle(color: Colors.white70),
+              labelStyle: TextStyle(color: Colors.white),
               onTap: () {
                 showDialog<String>(
                   context: context,
@@ -1710,6 +1824,13 @@ class _TimeLineState extends State<TimeLinePage> {
                                             _selectedDate);
                                   }),
                               );
+
+                              await UserDatabase.getExpenseItemCollection(companyId: widget.companyId, userUid: _userId, date: DateFormat('yyyy-MM-dd').format(_selectedDate)).get().then((QuerySnapshot querySnapshot2) {
+                                for(int i = 0; i < querySnapshot2.docs.length; i++){
+                                  UserDatabase.deleteExpenseDoc(companyId: widget.companyId, userUid: _userId, date: DateFormat('yyyy-MM-dd').format(_selectedDate), expenseId: i);
+                                }
+                              });
+
                               await UserDatabase.addUserDateItem(
                                   companyId: widget.companyId,
                                   userUid: _userId,
@@ -1734,10 +1855,10 @@ class _TimeLineState extends State<TimeLinePage> {
           SpeedDialChild(
             child: _userLocked? Icon(Icons.lock_open, color: Colors.white) : Icon(Icons.lock_outline, color: Colors.white),
             backgroundColor: Colors.redAccent[100],
-            labelBackgroundColor: Colors.black38,
+            labelBackgroundColor: Colors.blueGrey,
             labelShadow: [BoxShadow(color: Colors.black12), BoxShadow(color: Colors.black12)],
             label: _userLocked? '잠금 해제' : '계정 잠금',
-            labelStyle: TextStyle(color: Colors.white70),
+            labelStyle: TextStyle(color: Colors.white),
             onTap: (){
               setState((){
                 if(_userLocked == false){
@@ -1825,10 +1946,10 @@ class _TimeLineState extends State<TimeLinePage> {
           SpeedDialChild(
             child: _branchNotice.length > 0 ? Icon(Icons.notification_important_outlined, color: Colors.white,) : Icon(Icons.notifications_none, color: Colors.white,),
             backgroundColor: Colors.redAccent[100],
-            labelBackgroundColor: Colors.black38,
+            labelBackgroundColor: Colors.blueGrey,
             labelShadow: [BoxShadow(color: Colors.black12), BoxShadow(color: Colors.black12)],
             label: '공지사항',
-            labelStyle: TextStyle(color: Colors.white70),
+            labelStyle: TextStyle(color: Colors.white),
             onTap: (){
               showDialog<String>(
                 context: context,
@@ -1846,6 +1967,58 @@ class _TimeLineState extends State<TimeLinePage> {
                         Navigator.pop(context, 'Cancel');
                       },
                       child: const Text('Close'),
+                    ),
+                  ],
+                ),);
+            },
+          ),
+          SpeedDialChild(
+            child: Icon(Icons.no_accounts, color: Colors.white,),
+            backgroundColor: Colors.redAccent[100],
+            labelBackgroundColor: Colors.blueGrey,
+            labelShadow: [BoxShadow(color: Colors.black12), BoxShadow(color: Colors.black12)],
+            label: '회원탈퇴',
+            labelStyle: TextStyle(color: Colors.white),
+            onTap: (){
+              showDialog<String>(
+                context: context,
+                builder: (BuildContext context) => AlertDialog(
+                  backgroundColor: Color(0xFF333A47),
+                  title: const Text('회원탈퇴', style: TextStyle(fontSize: 15, color: Colors.white)),
+                  content: Container(
+                      child: Text("탈퇴하시겠습니까? 모든 기록이 삭제됩니다.", style: TextStyle(color: Colors.white70),textAlign: TextAlign.left)
+                  ),
+                  actions: <Widget>[
+                    TextButton(
+                      onPressed: () async{
+                        await UserDatabase.deleteUser(companyId: widget.companyId, userUid: _userId);
+
+                        UserDatabase.getItemCollection(companyId: widget.companyId, userUid: _userId).get().then((QuerySnapshot querySnapshot) {
+                          querySnapshot.docs.forEach((doc) {
+                            UserDatabase.deleteDoc(companyId: widget.companyId, userUid: _userId, date: doc.id);
+                            UserDatabase.getExpenseItemCollection(companyId: widget.companyId, userUid: _userId, date: doc.id).get().then((QuerySnapshot querySnapshot2) {
+                              for(int i = 0; i < querySnapshot2.docs.length; i++){
+                                UserDatabase.deleteExpenseDoc(companyId: widget.companyId, userUid: _userId, date: doc.id, expenseId: i);
+                              }
+                            });
+                          });
+                        });
+
+                        Navigator.pop(context, 'Ok');
+                        Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                settings: RouteSettings(name: '/'+ widget.companyId),
+                                builder: (context) => UserLoginPage(companyId: widget.companyId, title: 'Attendi'))
+                        );
+                      },
+                      child: const Text('Ok'),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        Navigator.pop(context, 'Cancel');
+                      },
+                      child: const Text('Cancel'),
                     ),
                   ],
                 ),);

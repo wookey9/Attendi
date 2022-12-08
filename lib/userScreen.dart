@@ -1,8 +1,12 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:email_validator/email_validator.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:loading_indicator/loading_indicator.dart';
+import 'package:webviewx/webviewx.dart';
+import 'myAdKakaoFit.dart';
 import 'user_database.dart';
 import 'branch_database.dart';
 import 'administratorScreen.dart';
@@ -28,6 +32,7 @@ class _UserLoginPageState extends State<UserLoginPage> {
   String _passwordInput = "";
   String _passwordNew = "";
   String _passwordRef = "admin123";
+  String _email = "";
   String valueText = "";
   String valueText2 = "";
   bool initDone = false;
@@ -36,6 +41,9 @@ class _UserLoginPageState extends State<UserLoginPage> {
   @override
   void initState(){
     try{
+      SharedPreferences.getInstance().then((prefs) {
+        prefs.setString('companycode', widget.companyId);
+      });
       BranchDatabase.getBranchCollection(companyId: widget.companyId).get().then((QuerySnapshot querySnapshot){
         setState(() {
           for(int i = 0; i < querySnapshot.docs.length; i++){
@@ -108,7 +116,7 @@ class _UserLoginPageState extends State<UserLoginPage> {
                 children: [
                   Text('A',style: TextStyle(fontSize: 30, color: Colors.teal[200], fontWeight: FontWeight.bold),),
                   Padding(padding: EdgeInsets.fromLTRB(0, 0, 0, 2),
-                    child: Text('ttendi #${widget.companyId}', style: TextStyle(fontSize: 20, color: Colors.teal[200],),),)
+                    child: Text('ttendi #${widget.companyId.toUpperCase()}', style: TextStyle(fontSize: 20, color: Colors.teal[200],),),)
                 ],
               ),
               backgroundColor: Color(0xFF333A47),
@@ -131,7 +139,7 @@ class _UserLoginPageState extends State<UserLoginPage> {
                     IconButton(
                       icon: Icon(Icons.exit_to_app),
                       onPressed: () async {
-                        Navigator.pop(context);
+                        Navigator.popUntil(context, ModalRoute.withName(Navigator.defaultRouteName));
                       },
                     ),
                   ],),
@@ -200,69 +208,70 @@ class _UserLoginPageState extends State<UserLoginPage> {
                                 }
                               });
 
-
                               if(_userPasswordRef[_userId] != null && _userPasswordRef[_userId]!.length > 0){
                                 showDialog<String>(
                                   context: context,
-                                  builder: (BuildContext context) => AlertDialog(
-                                    backgroundColor: Color(0xFF333A47),
-                                    title: const Text('비밀번호를 입력하세요.', style: TextStyle(color: Colors.white)),
-                                    content: Container(
-                                      height: 60,
-                                      child:  Column(
-                                        children: [
-                                          TextFormField(
-                                            style: TextStyle(color: Colors.white70),
-                                            obscureText: true,
-                                            decoration: const InputDecoration(
-                                              border: OutlineInputBorder(borderSide: BorderSide(color: Colors.white70)),
-                                              enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white70)),
-                                              labelText: 'Password',
-                                              labelStyle: TextStyle(color: Colors.white70),
+                                  builder: (BuildContext context) => WebViewAware(
+                                    child :  AlertDialog(
+                                      backgroundColor: Color(0xFF333A47),
+                                      title: const Text('비밀번호를 입력하세요.', style: TextStyle(color: Colors.white)),
+                                      content: Container(
+                                        height: 60,
+                                        child:  Column(
+                                          children: [
+                                            TextFormField(
+                                              style: TextStyle(color: Colors.white70),
+                                              obscureText: true,
+                                              decoration: const InputDecoration(
+                                                border: OutlineInputBorder(borderSide: BorderSide(color: Colors.white70)),
+                                                enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white70)),
+                                                labelText: 'Password',
+                                                labelStyle: TextStyle(color: Colors.white70),
+                                              ),
+                                              onChanged: ((value) => {
+                                                setState(() {
+                                                  _userPasswordInput = value;
+                                                })
+                                              }),
                                             ),
-                                            onChanged: ((value) => {
-                                              setState(() {
-                                                _userPasswordInput = value;
-                                              })
-                                            }),
-                                          ),
-                                        ],
+                                          ],
+                                        ),
                                       ),
-                                    ),
-                                    actions: <Widget>[
-                                      TextButton(
-                                        onPressed: () => {
-                                          setState((){
-                                            if(_userPasswordInput == _userPasswordRef[_userId]){
-                                              SharedPreferences.getInstance().then((prefs) {
-                                                prefs.setString('username', nameController.text);
-                                                prefs.setString('branch', _selectedBranch!);
-                                              });
+                                      actions: <Widget>[
+                                        TextButton(
+                                          onPressed: () => {
+                                            setState((){
+                                              if(_userPasswordInput == _userPasswordRef[_userId]){
+                                                SharedPreferences.getInstance().then((prefs) {
+                                                  prefs.setString('username', nameController.text);
+                                                  prefs.setString('branch', _selectedBranch!);
+                                                });
 
-                                              Navigator.pop(context, 'Ok');
-                                              Navigator.push(
-                                                context,
-                                                MaterialPageRoute(builder: (context) =>
-                                                    TimeLinePage(
-                                                        title: "My Working time",companyId: widget.companyId, user: nameController.text, workplace: _selectedBranch!)),
-                                              );
-                                            }
-                                            else{
-                                              Fluttertoast.showToast(msg: '비밀번호가 틀렸습니다.\n 비밀번호 분실시 관리자에게 잠금 해제 요청하세요', timeInSecForIosWeb: 5);
-                                            }
-                                          })
-                                        },
-                                        child: const Text('Ok'),
-                                      ),
-                                      TextButton(
-                                        onPressed: () {
-                                          Navigator.pop(context, 'Cancel');
-                                          _userPasswordInput = "";
-                                        },
-                                        child: const Text('Cancel'),
-                                      ),
-                                    ],
-                                  ),);
+                                                Navigator.pop(context, 'Ok');
+                                                Navigator.push(
+                                                  context,
+                                                  MaterialPageRoute(builder: (context) =>
+                                                      TimeLinePage(
+                                                          title: "My Working time",companyId: widget.companyId, user: nameController.text, workplace: _selectedBranch!)),
+                                                );
+                                              }
+                                              else{
+                                                Fluttertoast.showToast(msg: '비밀번호가 틀렸습니다.\n 비밀번호 분실시 관리자에게 잠금 해제 요청하세요', timeInSecForIosWeb: 5);
+                                              }
+                                            })
+                                          },
+                                          child: const Text('Ok'),
+                                        ),
+                                        TextButton(
+                                          onPressed: () {
+                                            Navigator.pop(context, 'Cancel');
+                                            _userPasswordInput = "";
+                                          },
+                                          child: const Text('Cancel'),
+                                        ),
+                                      ],
+                                    ),)
+                                );
                               }
                               else{
                                 SharedPreferences.getInstance().then((prefs) {
@@ -284,31 +293,14 @@ class _UserLoginPageState extends State<UserLoginPage> {
                       margin: EdgeInsets.all(10),
                       alignment: Alignment.bottomRight,
                       child: TextButton(
-                        child: Text('Administrator mode', style: TextStyle(color: Colors.teal[200]),),
+                        child: Text('관리자 모드', style: TextStyle(color: Colors.teal[200]),),
                         onPressed: (){
-                          _inputAdminPasswordDialog(context).then((value) {
-                            if(_passwordRef.isNotEmpty){
-                              if(_passwordRef == _passwordInput){
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(builder: (context) =>
-                                      AdminPage(
-                                        companyName : widget.companyId, adminPassword: _passwordRef, )),);
-                              }
-                              else{
-                                Fluttertoast.showToast(msg: '비밀번호가 틀렸습니다.', timeInSecForIosWeb: 2);
-                              }
-                              _passwordInput = "";
-                            }
-                            else{
-                              Fluttertoast.showToast(msg: '회원가입을 해주세요.');
-                            }
-                          });
+
+                          _inputAdminPasswordDialog(context);
                         },
                       ),
                     ),
-
-
+                    getAdKakaoFit('Attendi-web'),
                   ],
                 )
             )
@@ -318,9 +310,12 @@ class _UserLoginPageState extends State<UserLoginPage> {
 
   }
 
-  Future<void> _inputAdminPasswordDialog(BuildContext context) {
-    UserDatabase.updateAdminPasswordDb(widget.companyId,_passwordRef).then((value) {
-      _passwordRef = value;
+  Future<void> _inputAdminPasswordDialog(BuildContext context) async {
+    String password = await UserDatabase.updateAdminPasswordDb(widget.companyId,_passwordRef);
+    String email = await UserDatabase.getAdminEmailDb(widget.companyId);
+    setState(() {
+      _passwordRef = password;
+      _email = email;
     });
 
     return showDialog(
@@ -331,37 +326,104 @@ class _UserLoginPageState extends State<UserLoginPage> {
   }
 
   Widget _getAdminPasswordWidget() {
-    return AlertDialog(
-      backgroundColor: Color(0xFF333A47),
-      title: Text('Input password', style: TextStyle(color: Colors.white70),),
-      content: TextFormField(
-        onChanged: (value) {
-          setState(() {
-            valueText = value;
-          });
-        },
-        obscureText: true,
-        controller: _textFieldController,
-        decoration: InputDecoration(
-          border: OutlineInputBorder(),
-          enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white70)),
-          //hintText: "Password",
-          labelText: 'Password',
-          labelStyle: TextStyle(color: Colors.white70),
+    return WebViewAware(
+
+      child:AlertDialog(
+        backgroundColor: Color(0xFF333A47),
+        title: Text('관리자 비밀번호를 입력하세요.', style: TextStyle(color: Colors.white70, fontSize: 18),),
+        content: TextFormField(
+            onChanged: (value) {
+              setState(() {
+                valueText = value;
+              });
+            },
+            obscureText: true,
+            controller: _textFieldController,
+            decoration: InputDecoration(
+              border: OutlineInputBorder(),
+              enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white70)),
+              //hintText: "Password",
+              labelText: 'Password',
+              labelStyle: TextStyle(color: Colors.white70),
+            ),
+            style: TextStyle(color : Colors.white70)
         ),
-          style: TextStyle(color : Colors.white70)
-      ),
-      actions: <Widget>[
-        TextButton(
-          child: Text('OK'),
-          onPressed: () {
-            setState(() {
-              _passwordInput = valueText;
-              Navigator.pop(context);
-            });
-          },
-        ),
-      ],
+        actions: <Widget>[
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              TextButton(
+                child: Text('Forget Password', style: TextStyle(color: Colors.redAccent[100]),),
+                onPressed: () async{
+                  if(EmailValidator.validate(_email)){
+                    await FirebaseAuth.instance.sendPasswordResetEmail(email: _email);
+                    Fluttertoast.showToast(msg: '등록된 Email 주소로 비밀번호 재설정 링크 전송되었습니다.');
+                  }
+                  Navigator.pop(context);
+                },
+              ),
+              TextButton(
+                child: Text('OK'),
+                onPressed: () async{
+                  setState((){
+                    _passwordInput = valueText;
+                  });
+                  Navigator.pop(context);
+                  if(EmailValidator.validate(_email)){
+                    try {
+                      UserCredential userCredential = await FirebaseAuth.instance.signInWithEmailAndPassword(
+                          email: _email,
+                          password: _passwordInput
+                      );
+                      if(_passwordRef != _passwordInput){
+                        UserDatabase.addAdminUserItem(companyId: widget.companyId,userUid: 'Administrator', key: 'password', value: _passwordInput);
+                        setState(() {
+                          _passwordRef = _passwordInput;
+                        });
+                      }
+
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (context) =>
+                            AdminPage(
+                              companyName : widget.companyId, adminPassword: _passwordRef, email: _email, )),);
+
+                    } on FirebaseAuthException catch (e) {
+                      if (e.code == 'user-not-found') {
+                        Fluttertoast.showToast(msg: '회원가입을 해주세요.');
+                        print('No user found for that email.');
+                      } else if (e.code == 'wrong-password') {
+                        Fluttertoast.showToast(msg: '비밀번호가 틀렸습니다.', timeInSecForIosWeb: 2);
+                        print('Wrong password provided for that user.');
+                      }
+                    }
+                  }
+                  else{
+                    if(_passwordRef.isNotEmpty){
+                      if(_passwordRef == _passwordInput){
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (context) =>
+                              AdminPage(
+                                companyName : widget.companyId, adminPassword: _passwordRef, email: _email, )),);
+                      }
+                      else{
+                        Fluttertoast.showToast(msg: '비밀번호가 틀렸습니다.', timeInSecForIosWeb: 2);
+                      }
+                      setState((){
+                        _passwordInput = "";
+                      });
+                    }
+                    else{
+                      Fluttertoast.showToast(msg: '회원가입을 해주세요.');
+                    }
+                  }
+                },
+              ),
+            ],
+          )
+        ],
+      )
     );
   }
 }

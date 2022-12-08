@@ -5,5 +5,5 @@ class CheckListItem{
 
   String name;
   DateTime writetime;
-  Map<DateTime, bool> checked;
+  Map<DateTime, String> checked;
 }

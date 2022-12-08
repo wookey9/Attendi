@@ -1,12 +1,17 @@
 import 'dart:async';
 import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:intl/intl.dart';
+import 'package:pattern_formatter/numeric_formatter.dart';
+import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:work_inout/userScreen.dart';
 import 'package:work_inout/user_database.dart';
 import 'adminTimelineTab.dart';
 import 'branch_database.dart';
@@ -16,13 +21,15 @@ import 'timelineScreen.dart';
 import 'package:flutter_speed_dial/flutter_speed_dial.dart';
 import 'checklist.dart';
 import 'myDownload.dart';
+import 'package:fl_chart/fl_chart.dart';
 
 
 class AdminPage extends StatefulWidget{
-  const AdminPage({required this.companyName, required this.adminPassword });
+  const AdminPage({required this.companyName, required this.adminPassword, required this.email });
 
   final String companyName;
   final String adminPassword;
+  final String email;
   @override
   State<AdminPage> createState() => _AdminPageState();
 }
@@ -43,6 +50,7 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin{
   late List<StreamController<int>> _listStreamController = [];
   late List<TextEditingController> _listNoticeEditController = [];
   late List<TextEditingController> _listDiaryFormatEditController = [];
+  late List<StreamController<int>> _listBottomStreamCon = [];
 
   late List<String> _listNoticeBranch = [];
   late List<String> _listDiaryFormatBranch = [];
@@ -59,11 +67,16 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin{
   late var _diaryFormatToAll = false;
   late var _checklistToAll = false;
 
+  final double _lowestPay = 9160;
+  late int _selectedBottomIndex = 0;
   late ScrollController _timelieScrollCon = ScrollController();
 
   var _tabController;
+  var _bottomTabController;
+  UserCredential? _userCredential;
+
   @override
-  void initState() {
+  void initState(){
     _companyName = widget.companyName;
     _adminPassword = widget.adminPassword;
     fToast.init(context);
@@ -75,6 +88,18 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin{
       print(e);
     }
 
+    try {
+      FirebaseAuth.instance.signInWithEmailAndPassword(
+          email: widget.email,
+          password: widget.adminPassword
+      ).then((value) => _userCredential);
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'user-not-found') {
+        print('No user found for that email.');
+      } else if (e.code == 'wrong-password') {
+        print('Wrong password provided for that user.');
+      }
+    }
   }
 
   Future<void> createBranchTabs() async{
@@ -113,7 +138,7 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin{
           var data = querySnapshot2.docs[i].data()! as Map<String, dynamic>;
           String title = "";
           DateTime writetime = DateTime.now();
-          Map<DateTime, bool> checked = {};
+          Map<DateTime, String> checked = {};
 
           data.forEach((key, value) {
             if(key == 'name'){
@@ -130,7 +155,7 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin{
               if(value != null){
                 DateTime date = DateFormat('yyyy-MM-dd').parse(key);
                 if(date != null && date.isBefore(DateTime.now()))
-                  checked[date] = value == "true" ? true : false;
+                  checked[date] = value;
               }
             }
           });
@@ -144,6 +169,7 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin{
 
     }
 
+    /*
     var stcon = StreamController<int>();
     _listStreamController.add(stcon);
     _branchTabBar.add(Tab( child:
@@ -157,34 +183,39 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin{
     ),));
     _branchUserTabView.add(BranchTimelinePage(companyName: _companyName, branchList: _branchList, scrollController: _timelieScrollCon,));
 
+     */
+
     _branchList.forEach((branchName) {
       var stcon = StreamController<int>();
+      var bottomStCon = StreamController<int>();
       _listStreamController.add(stcon);
+      _listBottomStreamCon.add(bottomStCon);
       _branchTabBar.add(Tab(
       child: Row(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Icon(Icons.place_outlined, size: 18,),
-          Text(branchName),
+          Text(' ' + branchName,),
         ],
       )
         ,));
-      _branchUserTabView.add(BranchPage(company: _companyName, branch: branchName, stream: stcon.stream,));
+      _branchUserTabView.add(BranchPage(company: _companyName, branch: branchName, stream: stcon.stream, lowestPay: _lowestPay, bottomStream: bottomStCon.stream,));
     });
     var stcon2 = StreamController<int>();
     _listStreamController.add(stcon2);
     _branchTabBar.add(Tab(
         child: Row(
           mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Icon(Icons.settings, size: 18,),
-            Text('설정'),
+            Icon(Icons.settings,),
+            Text(' 설정', ),
           ],
         )
     ));
-    _branchUserTabView.add(BranchEditPage(company: _companyName, branchList: _branchList, stream: stcon2.stream, adminPassword: widget.adminPassword,));
+    _branchUserTabView.add(BranchEditPage(company: _companyName, branchList: _branchList, stream: stcon2.stream, adminPassword: widget.adminPassword, userCredential: _userCredential, email: widget.email, lowestPay: _lowestPay,));
 
     _tabController = TabController(
         length: _branchTabBar.length,
@@ -239,21 +270,16 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin{
           child: Scaffold(
             backgroundColor: Color(0xFF333A47),
             appBar: AppBar(
+              leadingWidth: 30,
               backgroundColor: Color(0xFF333A47),
               // Here we take the value from the MyHomePage object that was created by
               // the App.build method, and use it to set our appbar title.
-              title: Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text('A',style: TextStyle(fontSize: 30, color: Colors.teal[200], fontWeight: FontWeight.bold),),
-                  Padding(padding: EdgeInsets.fromLTRB(0, 0, 0, 2),
-                    child: Text('dministrator', style: TextStyle(fontSize: 20, color: Colors.teal[200],),),)
-                ],
-              ),
-              bottom: TabBar(
+              title: TabBar(
                 controller: _tabController,
                 isScrollable: true,
-                unselectedLabelColor: Colors.white.withOpacity(0.3),
+                unselectedLabelColor: Colors.white24,
+                unselectedLabelStyle: TextStyle(fontSize: 14),
+                labelStyle: TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
                 labelColor: Colors.redAccent[100],
                 indicatorColor: Colors.redAccent[100],
                 tabs: _branchTabBar,
@@ -264,13 +290,79 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin{
               controller: _tabController,
               children: _branchUserTabView,
             ),
-            floatingActionButton: _buildFloatingActionButton()
+            floatingActionButton: _buildFloatingActionButton(),
+            /*bottomNavigationBar: BottomNavigationBar(
+              backgroundColor: Color(0xFF333A47),
+              items: const <BottomNavigationBarItem>[
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.people),
+                  label: '직원현황',
+                  backgroundColor: Color(0xFF333A47),
+                ),
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.access_time_outlined),
+                  label: '타임라인',
+                  backgroundColor: Color(0xFF333A47),
+                ),
+              ],
+              currentIndex: _selectedBottomIndex,
+              selectedItemColor: Colors.redAccent[100],
+              onTap: _onBottomItemTapped,
+              unselectedItemColor: Colors.white30,
+            ),
+
+             */
+            bottomNavigationBar: (_selectedTabIdx == _branchList.length) ? null : BottomAppBar(
+              child: Container(
+                color: Color(0xFF333A47),
+                child: TabBar(
+                  indicator: BoxDecoration(color: Colors.black38),
+                  tabs: <Widget>[
+                    Tab(
+                      child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.people,color: _getBottomSelectedColor(0),),
+                        Text(" 직원현황", style: TextStyle(color: _getBottomSelectedColor(0)))
+                      ],
+                    ),
+                    ),
+                    Tab(child:
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.access_time_outlined,color: _getBottomSelectedColor(1),),
+                        Text(" 타임라인", style: TextStyle(color: _getBottomSelectedColor(1)))
+                      ],) ),
+                  ],
+                  controller: _bottomTabController,
+                  onTap: (index){
+                    _onBottomItemTapped(index);
+                  },
+                ),
+              ),
+            ),
+
           )
       );
     }
   }
 
+  Color? _getBottomSelectedColor(int index){
+    return _selectedBottomIndex == index ? Colors.redAccent[100] : Colors.white30;
+  }
+
+  void _onBottomItemTapped(int index) {
+    setState(() {
+      _selectedBottomIndex = index;
+      for(var stcon in _listBottomStreamCon){
+        stcon.add(index);
+      }
+    });
+  }
+
   Widget? _buildFloatingActionButton(){
+    /*
     if(_selectedTabIdx == 0){
         return FloatingActionButton(
             backgroundColor: Colors.blueAccent[200],
@@ -286,15 +378,14 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin{
                   duration: Duration(milliseconds: 500), curve: Curves.easeInOut);
             });
     }
-    else if(_selectedTabIdx == _branchList.length + 1){
+
+     */
+    if(_selectedTabIdx == _branchList.length){
       return FloatingActionButton(
         backgroundColor: Colors.redAccent[100],
         child: Icon(Icons.save, color: Colors.white,),
         onPressed: (){
           _listStreamController[_selectedTabIdx].add(0);
-
-
-          Navigator.pop(context);
       });
     }
     else{
@@ -314,10 +405,10 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin{
            labelShadow: [BoxShadow(color: Colors.black12), BoxShadow(color: Colors.black12)],
            foregroundColor: Colors.white,
            backgroundColor: Colors.redAccent[100],
-           labelBackgroundColor: Colors.black12,
+           labelBackgroundColor: Colors.blueGrey,
            child: Icon(Icons.download, color: Colors.white),
            label: '엑셀 다운로드',
-           labelStyle: TextStyle(color: Colors.white70),
+           labelStyle: TextStyle(color: Colors.white),
            onTap: () {
              _listStreamController[_selectedTabIdx].add(0);
            }
@@ -325,12 +416,12 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin{
          SpeedDialChild(
            child: Icon(Icons.notification_important_outlined, color: Colors.white,),
            backgroundColor: Colors.redAccent[100],
-           labelBackgroundColor: Colors.black12,
+           labelBackgroundColor: Colors.blueGrey,
            labelShadow: [BoxShadow(color: Colors.black12), BoxShadow(color: Colors.black12)],
            label : '공지사항',
-           labelStyle: TextStyle(color: Colors.white70),
+           labelStyle: TextStyle(color: Colors.white),
            onTap: (){
-             _listNoticeEditController[_selectedTabIdx - 1].text = _listNoticeBranch[_selectedTabIdx - 1];
+             _listNoticeEditController[_selectedTabIdx].text = _listNoticeBranch[_selectedTabIdx];
              showDialog<String>(
                context: context,
                builder: (BuildContext context) => StatefulBuilder(builder: (BuildContext context, StateSetter setState){
@@ -339,6 +430,7 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin{
                    backgroundColor: Color(0xFF333A47),
                    title: Row(
                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+
                      children: [
                        Text('공지사항', style: TextStyle(color: Colors.teal[200], fontSize: 17),),
                        Row(
@@ -359,7 +451,7 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin{
                      child: SingleChildScrollView(
                        scrollDirection: Axis.vertical,
                        child: TextFormField(
-                         controller: _listNoticeEditController[_selectedTabIdx - 1],
+                         controller: _listNoticeEditController[_selectedTabIdx],
                          style: TextStyle(color: Colors.white70),
                          keyboardType: TextInputType.multiline,
                          maxLines: null,
@@ -393,14 +485,14 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin{
                                  onPressed: () {
                                    Navigator.pop(context, 'Save');
                                    if(_noticeToAll == false){
-                                     _listNoticeBranch[_selectedTabIdx - 1] = _listNoticeEditController[_selectedTabIdx - 1].text;
-                                     BranchDatabase.addItem(companyId: _companyName, branch: _branchList[_selectedTabIdx - 1], key: 'notice', value: _listNoticeEditController[_selectedTabIdx - 1].text);
+                                     _listNoticeBranch[_selectedTabIdx] = _listNoticeEditController[_selectedTabIdx].text;
+                                     BranchDatabase.addItem(companyId: _companyName, branch: _branchList[_selectedTabIdx], key: 'notice', value: _listNoticeEditController[_selectedTabIdx].text);
                                      _listStreamController[_selectedTabIdx].add(1);
                                    }
                                    else{
                                      for(int i = 0; i < _branchList.length; i++){
-                                       _listNoticeBranch[i] = _listNoticeEditController[_selectedTabIdx - 1].text;
-                                       BranchDatabase.addItem(companyId: _companyName, branch: _branchList[i], key: 'notice', value: _listNoticeEditController[_selectedTabIdx - 1].text);
+                                       _listNoticeBranch[i] = _listNoticeEditController[_selectedTabIdx].text;
+                                       BranchDatabase.addItem(companyId: _companyName, branch: _branchList[i], key: 'notice', value: _listNoticeEditController[_selectedTabIdx].text);
                                        _listStreamController[i].add(1);
                                      }
                                      _noticeToAll = false;
@@ -427,12 +519,12 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin{
          SpeedDialChild(
            child: Icon(Icons.checklist, color: Colors.white,),
            backgroundColor: Colors.redAccent[100],
-           labelBackgroundColor: Colors.black12,
+           labelBackgroundColor: Colors.blueGrey,
            labelShadow: [BoxShadow(color: Colors.black12), BoxShadow(color: Colors.black12)],
            label: '체크리스트',
-           labelStyle: TextStyle(color: Colors.white70),
+           labelStyle: TextStyle(color: Colors.white),
            onTap: (){
-             String branch = _branchList[_selectedTabIdx - 1];
+             String branch = _branchList[_selectedTabIdx];
 
              setState((){
                curCheckList = [];
@@ -568,15 +660,16 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin{
                                     i++;
                                   }
                                 }
+
+                                _updateBranchChecklistDatabase(branch, false);
+
                                 if(_checklistToAll){
                                   _branchList.forEach((br) {
-                                    _updateBranchChecklistDatabase(br);
+                                    if(br != branch){
+                                      _updateBranchChecklistDatabase(br, true);
+                                    }
                                   });
                                 }
-                                else{
-                                  _updateBranchChecklistDatabase(branch);
-                                }
-
                               }
 
                               Navigator.pop(context, 'Save');
@@ -597,12 +690,12 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin{
          SpeedDialChild(
            child: Icon(Icons.event_note_sharp, color: Colors.white,),
            backgroundColor: Colors.redAccent[100],
-           labelBackgroundColor: Colors.black12,
+           labelBackgroundColor: Colors.blueGrey,
            labelShadow: [BoxShadow(color: Colors.black12), BoxShadow(color: Colors.black12)],
            label: '업무일지 양식',
-           labelStyle: TextStyle(color: Colors.white70),
+           labelStyle: TextStyle(color: Colors.white),
            onTap: (){
-             _listDiaryFormatEditController[_selectedTabIdx - 1].text = _listDiaryFormatBranch[_selectedTabIdx - 1];
+             _listDiaryFormatEditController[_selectedTabIdx].text = _listDiaryFormatBranch[_selectedTabIdx];
              showDialog<String>(
                context: context,
                builder: (BuildContext context) => StatefulBuilder(builder: (BuildContext context, StateSetter setState){
@@ -633,7 +726,7 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin{
                      child: SingleChildScrollView(
                        scrollDirection: Axis.vertical,
                        child: TextFormField(
-                         controller: _listDiaryFormatEditController[_selectedTabIdx - 1],
+                         controller: _listDiaryFormatEditController[_selectedTabIdx],
                          style: TextStyle(color: Colors.white70),
                          keyboardType: TextInputType.multiline,
                          maxLines: null,
@@ -655,7 +748,7 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin{
                        children: [
                          TextButton(
                            onPressed: () {
-                             _listDiaryFormatEditController[_selectedTabIdx - 1].text = "";
+                             _listDiaryFormatEditController[_selectedTabIdx].text = "";
                            },
                            child: Text('Clear', style: TextStyle(color: Colors.redAccent[100]),),
                          ),
@@ -667,13 +760,13 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin{
                                  onPressed: () {
                                    Navigator.pop(context, 'Save');
                                    if(_diaryFormatToAll == false){
-                                     _listDiaryFormatBranch[_selectedTabIdx - 1] = _listDiaryFormatEditController[_selectedTabIdx - 1].text;
-                                     BranchDatabase.addItem(companyId: _companyName, branch: _branchList[_selectedTabIdx - 1], key: 'diaryFormat', value: _listDiaryFormatEditController[_selectedTabIdx - 1].text);
+                                     _listDiaryFormatBranch[_selectedTabIdx] = _listDiaryFormatEditController[_selectedTabIdx].text;
+                                     BranchDatabase.addItem(companyId: _companyName, branch: _branchList[_selectedTabIdx], key: 'diaryFormat', value: _listDiaryFormatEditController[_selectedTabIdx].text);
                                    }
                                    else{
                                      for(int i = 0; i < _branchList.length; i++){
-                                       _listDiaryFormatBranch[i] = _listDiaryFormatEditController[_selectedTabIdx - 1].text;
-                                       BranchDatabase.addItem(companyId: _companyName, branch: _branchList[i], key: 'diaryFormat', value: _listDiaryFormatEditController[_selectedTabIdx - 1].text);
+                                       _listDiaryFormatBranch[i] = _listDiaryFormatEditController[_selectedTabIdx].text;
+                                       BranchDatabase.addItem(companyId: _companyName, branch: _branchList[i], key: 'diaryFormat', value: _listDiaryFormatEditController[_selectedTabIdx].text);
                                      }
                                      _diaryFormatToAll = false;
                                    }
@@ -697,7 +790,7 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin{
      );
     }
   }
-  _updateBranchChecklistDatabase(String br, ){
+  _updateBranchChecklistDatabase(String br, bool copyToAll){
     for(int i = 0; i < (_listCheckListBranch[br]!).length; i++){
       BranchDatabase.deleteCheckListItem(companyId: _companyName, branch: br, checkId: i);
     }
@@ -705,10 +798,12 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin{
     for(int i = 0; i < curCheckList.length; i++){
       BranchDatabase.addCheckItem(companyId: _companyName, branch: br, checkId: i, key: 'name', value: curCheckList[i].name);
       BranchDatabase.addCheckItem(companyId: _companyName, branch: br, checkId: i, key: 'writetime', value: DateFormat('yyyy-MM-dd').format(curCheckList[i].writetime));
-      curCheckList[i].checked.forEach((key, value) {
-        BranchDatabase.addCheckItem(companyId: _companyName, branch: br, checkId: i, key: DateFormat('yyyy-MM-dd').format(key), value: value ? "true" : "false");
-      });
+      if(!copyToAll){
+        curCheckList[i].checked.forEach((key, value) {
+          BranchDatabase.addCheckItem(companyId: _companyName, branch: br, checkId: i, key: DateFormat('yyyy-MM-dd').format(key), value: value);
+        });
 
+      }
     }
 
     _listCheckListBranch[br] = curCheckList;
@@ -759,12 +854,15 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin{
 }
 
 class BranchEditPage extends StatefulWidget{
-  BranchEditPage({required this.company, required this.branchList, required this.stream, required this.adminPassword});
+  BranchEditPage({required this.company, required this.branchList, required this.stream, required this.adminPassword, required this.userCredential, required this.email, required this.lowestPay});
 
   final String company;
   final List<String> branchList;
   final Stream stream;
   final String adminPassword;
+  final UserCredential? userCredential;
+  final String? email;
+  final double lowestPay;
   @override
   State<BranchEditPage> createState() => _BranchEditPageState();
 }
@@ -778,6 +876,11 @@ class _BranchEditPageState extends State<BranchEditPage> with AutomaticKeepAlive
   ScrollController _scrollController = ScrollController();
   late String _passwordNew = "";
   late String _passwordOld = "";
+  late int _minuteInterval = 30;
+  late int _minuteIntervalOrg = 30;
+  late List<bool> _isSelectedMinInterval = [false,true,false];
+  late List<int> _listMinInterval = [15,30,60];
+  late bool _passwordFixFold = true;
 
   @override
   bool get wantKeepAlive => true;
@@ -788,7 +891,27 @@ class _BranchEditPageState extends State<BranchEditPage> with AutomaticKeepAlive
     _branchList = widget.branchList;
 
     _companyName = widget.company;
-
+    UserDatabase.getMinuteIntervalDb(_companyName).then((value) {
+      setState((){
+        _minuteInterval = value;
+        if(_listMinInterval.contains(_minuteInterval)){
+          for(int i = 0; i < _listMinInterval.length; i++){
+            var inter = _listMinInterval[i];
+            if(_minuteInterval == inter){
+              _isSelectedMinInterval[i] = true;
+            }
+            else{
+              _isSelectedMinInterval[i] = false;
+            }
+          }
+        }
+        else{
+          _minuteInterval = 30;
+          _isSelectedMinInterval[1] = true;
+        }
+        _minuteIntervalOrg = _minuteInterval;
+      });
+    });
     _branchList.forEach((element) {
       TextEditingController newEditor = TextEditingController();
       newEditor.text = element;
@@ -797,21 +920,77 @@ class _BranchEditPageState extends State<BranchEditPage> with AutomaticKeepAlive
     });
 
     widget.stream.listen((event) {
+      bool returnTohome = false;
       if(event is int){
         if(event == 0){
+          returnTohome = _saveBranchList();
+          print('interval save : $_minuteInterval');
+          if(_minuteInterval > 0 && _minuteInterval <= 60){
+            if(_minuteIntervalOrg != _minuteInterval){
+              UserDatabase.addAdminUserItem(companyId: _companyName, userUid: 'Administrator', key: 'minute_interval', value: _minuteInterval.toString());
+              Fluttertoast.showToast(msg: '근무시간 단위가 변경되었습니다.', timeInSecForIosWeb: 5);
+              Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      settings: RouteSettings(name: '/'+ _companyName),
+                      builder: (context) => UserLoginPage(companyId: _companyName, title: 'Attendi'))
+              );
+            }
+          }
           if(_passwordOld.length > 0 && _passwordNew.length > 0){
             setState((){
               if(widget.adminPassword == _passwordOld){
-                UserDatabase.addAdminUserItem(companyId: _companyName,userUid: 'Administrator', key: 'password', value: _passwordNew);
-                Fluttertoast.showToast(msg: '비밀번호가 변경되었습니다.!', timeInSecForIosWeb: 5);
-                //Navigator.pop(context, 'Ok');
+                if(FirebaseAuth.instance.currentUser != null){
+                  if(_passwordNew.length >= 8){
+                    FirebaseAuth.instance.currentUser!.updatePassword(_passwordNew).then((value) {
+                      print("Successfully changed password");
+
+                      UserDatabase.addAdminUserItem(companyId: _companyName,userUid: 'Administrator', key: 'password', value: _passwordNew);
+                      Fluttertoast.showToast(msg: '비밀번호가 변경되었습니다.', timeInSecForIosWeb: 5);
+                      Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              settings: RouteSettings(name: '/'+ _companyName),
+                              builder: (context) => UserLoginPage(companyId: _companyName, title: 'Attendi'))
+                      );
+                      //Navigator.pop(context, 'Ok');
+                    }).catchError((error){
+                      Fluttertoast.showToast(msg: '비밀번호를 8자리 이상으로 설정해주세요!', timeInSecForIosWeb: 5);
+                      print("Password can't be changed" + error.toString());
+                      //This might happen, when the wrong password is in, the user isn't found, or if the user hasn't logged in recently.
+                    });
+                  }
+                  else{
+                    Fluttertoast.showToast(msg: '비밀번호를 8자리 이상으로 설정해주세요!', timeInSecForIosWeb: 5);
+                  }
+
+                }
+                else{
+                  UserDatabase.addAdminUserItem(companyId: _companyName,userUid: 'Administrator', key: 'password', value: _passwordNew);
+                  Fluttertoast.showToast(msg: '비밀번호가 변경되었습니다.', timeInSecForIosWeb: 5);
+                  Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          settings: RouteSettings(name: '/'+ _companyName),
+                          builder: (context) => UserLoginPage(companyId: _companyName, title: 'Attendi'))
+                  );
+                }
               }
               else{
-                Fluttertoast.showToast(msg: 'Wrong old password!', timeInSecForIosWeb: 5);
+                Fluttertoast.showToast(msg: '기존 비밀번호가 일치하지 않습니다!', timeInSecForIosWeb: 5);
               }
             });
           }
-          _saveBranchList();
+          else{
+            if(returnTohome){
+              Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      settings: RouteSettings(name: '/'+ _companyName),
+                      builder: (context) => UserLoginPage(companyId: _companyName, title: 'Attendi'))
+              );
+            }
+          }
 
         }
       }
@@ -822,7 +1001,7 @@ class _BranchEditPageState extends State<BranchEditPage> with AutomaticKeepAlive
     return branchEditTabview();
   }
 
-  _saveBranchList(){
+  bool _saveBranchList(){
     if(!listEquals(_branchListOrg,_branchList)){
       _removeBranchList.forEach((element) {
         BranchDatabase.deleteItem(companyId: _companyName, branch: element);
@@ -854,8 +1033,9 @@ class _BranchEditPageState extends State<BranchEditPage> with AutomaticKeepAlive
         _branchListOrg = _branchList;
       });
       Fluttertoast.showToast(msg: '사업장 리스트가 변경되었습니다.', timeInSecForIosWeb: 5);
+      return true;
     }
-
+    return false;
   }
 
 
@@ -864,10 +1044,88 @@ class _BranchEditPageState extends State<BranchEditPage> with AutomaticKeepAlive
         onTap: () {
           FocusScope.of(context).unfocus;
         },
-        child : getBranchList()
+        child : Column(
+          children: [
+            Expanded(child: getBranchList(),),
+          ],
+        )
     );
   }
 
+  Widget buildDeleteAccount(){
+    return Padding(
+      padding: EdgeInsets.all(10),
+      child:  TextButton(
+          onPressed: (){
+            showDialog(context: context,
+                builder: (context){
+                  return AlertDialog(
+                    title: const Text('회원 탈퇴하시겠습니까?', style: TextStyle(color: Colors.white),),
+                    backgroundColor: Color(0xFF333A47),
+                    actions: [
+                      ElevatedButton(
+                        onPressed: () async{
+                          BranchDatabase.deleteCompanyListItem(companyId: _companyName);
+                          _branchList.forEach((element) {
+                            BranchDatabase.getBranchCheckListCollection(companyId: _companyName, branch: element).get().then((QuerySnapshot querySnapshot2){
+                              for(int i = 0; i < querySnapshot2.docs.length; i++) {
+                                BranchDatabase.deleteCheckListItem(companyId: _companyName, branch: element, checkId: i );
+                              }
+                            });
+                            BranchDatabase.deleteItem(companyId: _companyName, branch: element);
+                          });
+
+                          UserDatabase.getItemCollection(companyId: _companyName, userUid: "Administrator").snapshots().forEach((querySnapshot) {
+                            for (QueryDocumentSnapshot docSnapshot in querySnapshot.docs) {
+                              UserDatabase.getItemCollection(companyId: _companyName, userUid: docSnapshot.id).snapshots().forEach((querySnapshot2) {
+                                for(QueryDocumentSnapshot docSnapshot2 in querySnapshot2.docs){
+                                  UserDatabase.getExpenseItemCollection(companyId: _companyName, userUid: docSnapshot.id, date: docSnapshot2.id).snapshots().forEach((querySnapshot3) {
+                                    for(QueryDocumentSnapshot docSnapshot3 in querySnapshot3.docs){
+                                      docSnapshot3.reference.delete();
+                                    }
+                                  });
+                                  docSnapshot2.reference.delete();
+                                }
+                              });
+                              docSnapshot.reference.delete();
+                            }
+                          });
+
+                          try {
+                            await FirebaseAuth.instance.currentUser!.delete();
+                          } catch (e) {
+                            print('The user must reauthenticate before this operation can be executed.');
+                            print(e);
+                          }
+
+                          Navigator.popUntil(context, ModalRoute.withName(Navigator.defaultRouteName));
+                        },
+                        child: const Text('Ok'),
+                      ),
+                      OutlinedButton(
+                        onPressed: () {
+
+                          Navigator.of(context).pop();
+                        },
+                        child: const Text('Cancel'),
+                      ),
+                    ],
+                    content: Container(
+                        padding: const EdgeInsets.all(20),
+                        child: Text("탈퇴 시 회원님의 데이터는 모두 삭제되며, 복구는 불가능합니다.", style: TextStyle(color: Colors.white70),)
+                    ),
+                  );
+                }
+            );
+          },
+          child: Container(
+            alignment: Alignment.centerLeft,
+            margin: EdgeInsets.only(bottom: 30, top: 30),
+            child: Text('회원 탈퇴 ',style: TextStyle(color: Colors.redAccent,fontSize: 16),),
+          )
+      ),
+    );
+  }
 
   Widget getBranchList(){
     return ListView.builder(itemCount: _branchList.length + 2,
@@ -876,60 +1134,201 @@ class _BranchEditPageState extends State<BranchEditPage> with AutomaticKeepAlive
       if(index == 0){
         return Column(
           children: [
-            Padding(
+            SizedBox(height: 20,),
+            if(widget.email != null && widget.email!.length > 0) Padding(
                 padding: EdgeInsets.only(
-                    left: 10, top: 20, bottom: 10),
+                    left: 10, top: 0, bottom: 0),
                 child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    Icon(Icons.password, color: Colors.white,
-                      size: 22,),
-                    Text(' 비밀번호 변경',
-                      style: TextStyle(
-                        fontSize: 17, color: Colors.white,),
-                      textAlign: TextAlign.center,),
+                    Row(
+                      children: [
+                        Icon(Icons.email_outlined, color: Colors.white,
+                          size: 22,),
+                        Text(' Email',
+                          style: TextStyle(
+                            fontSize: 17, color: Colors.white,),
+                          textAlign: TextAlign.center,),
+                      ],
+                    ),
+                    Padding(
+                      padding: EdgeInsets.only(right: 10),
+                      child: Text(widget.email??"",
+                        style: TextStyle(
+                          fontSize: 17, color: Colors.white54,),
+                        textAlign: TextAlign.center,),
+                    )
                   ],
                 )
             ),
-            Container(
-              padding: EdgeInsets.all(10),
-              child: TextFormField(
-                style: TextStyle(color: Colors.white70),
-                obscureText: true,
-                decoration: const InputDecoration(
-                  border: OutlineInputBorder(borderSide: BorderSide(color: Colors.white70)),
-                  enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white70)),
-                  labelText: 'Old Password',
-                  labelStyle: TextStyle(color: Colors.white70),
+            if(widget.email != null && widget.email!.length > 0) Divider(color: Colors.white38,
+                thickness: 1,
+                height: 40),
+            Padding(
+                padding: EdgeInsets.only(
+                    left: 10, top: 0, bottom: 0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.attach_money, color: Colors.white,
+                          size: 22,),
+                        Text(' 최저시급',
+                          style: TextStyle(
+                            fontSize: 17, color: Colors.white,),
+                          textAlign: TextAlign.center,),
+                      ],
+                    ),
+                    Padding(
+                      padding: EdgeInsets.only(right: 10),
+                      child: Text(NumberFormat.currency(locale: 'ko', symbol: '₩').format(widget.lowestPay),
+                        style: TextStyle(
+                          fontSize: 17, color: Colors.white54,),
+                        textAlign: TextAlign.center,),
+                    )
+                  ],
+                )
+            ),
+            Divider(color: Colors.white38,
+                thickness: 1,
+                height: 40),
+            Padding(
+                padding: EdgeInsets.only(
+                    left: 10, top: 0, bottom: 0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.timelapse_outlined, color: Colors.white,
+                          size: 22,),
+                        Text(' 근무시간 단위',
+                          style: TextStyle(
+                            fontSize: 17, color: Colors.white,),
+                          textAlign: TextAlign.center,),
+                      ],
+                    ),
+                    Container(
+                      padding: EdgeInsets.only(right: 10),
+                      child: ToggleButtons(
+                        borderColor: Colors.white70,
+                        color: Colors.white,
+                        selectedBorderColor: Colors.white70,
+                        fillColor: Colors.teal[300],
+                        selectedColor: Colors.white,
+                        textStyle: TextStyle(fontSize: 15),
+
+                        borderRadius: BorderRadius.all(Radius.circular(5)),
+                        isSelected: _isSelectedMinInterval,
+                        children: _listMinInterval.map((value) => Text(value.toString() + '분')).toList(),
+                        onPressed: (int index){
+                          if(_isSelectedMinInterval[index]){
+
+                          }
+                          else{
+                            for(int i = 0; i < _isSelectedMinInterval.length; i++){
+                              if(i == index){
+                                setState(() {
+                                  _isSelectedMinInterval[i] = true;
+                                  _minuteInterval = _listMinInterval[i];
+                                });
+                                print('min : $_minuteInterval');
+                              }
+                              else{
+                                setState((){
+                                  _isSelectedMinInterval[i] = false;
+                                });
+                              }
+                            }
+                          }
+                        },
+                      ),
+                    ),
+
+                  ],
                 ),
-                onChanged: ((value) => {
-                  setState((){
-                    _passwordOld = value;
-                  })
-                }),
+            ),
+            Divider(color: Colors.white38,
+                thickness: 1,
+                height: 40),
+            Padding(
+                padding: EdgeInsets.only(
+                    left: 10, top: 0,),
+                child:   TextButton(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Icon(Icons.password, color: Colors.white,
+                        size: 22,),
+                      Text(' 비밀번호 변경 ',
+                        style: TextStyle(
+                          fontSize: 17, color: Colors.white,),
+                        textAlign: TextAlign.center,),
+                      if(_passwordFixFold) Icon(Icons.keyboard_arrow_down,color: Colors.white,
+                        size: 22,),
+                      if(!_passwordFixFold) Icon(Icons.keyboard_arrow_up,color: Colors.white,
+                        size: 22,)
+                    ],
+                  ),
+                  onPressed: (){
+                    setState(() {
+                      _passwordFixFold = !_passwordFixFold;
+                    });
+
+                  },
+                ),
+            ),
+            AnimatedContainer(
+              height: _passwordFixFold?0:180,
+              duration: Duration(milliseconds: 300),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    padding: EdgeInsets.all(10),
+                    child: TextFormField(
+                      style: TextStyle(color: Colors.white70),
+                      obscureText: true,
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(borderSide: BorderSide(color: Colors.white70)),
+                        enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white70)),
+                        labelText: 'Old Password',
+                        labelStyle: TextStyle(color: Colors.white70),
+                      ),
+                      onChanged: ((value) => {
+                        setState((){
+                          _passwordOld = value;
+                        })
+                      }),
+                    ),
+                  ),
+                  Container(
+                    padding: EdgeInsets.all(10),
+                    child:
+                    TextFormField(
+                      style: TextStyle(color: Colors.white70),
+                      obscureText: true,
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(borderSide: BorderSide(color: Colors.white70)),
+                        enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white70)),
+                        labelText: 'New Password',
+                        labelStyle: TextStyle(color: Colors.white70),
+                      ),
+                      onChanged: ((value) => {
+                        setState(() {
+                          _passwordNew = value;
+                        })
+                      }),
+                    ),
+                  ),
+
+                ],
               ),
             ),
-            Container(
-              padding: EdgeInsets.all(10),
-              child:
-              TextFormField(
-                style: TextStyle(color: Colors.white70),
-                obscureText: true,
-                decoration: const InputDecoration(
-                  border: OutlineInputBorder(borderSide: BorderSide(color: Colors.white70)),
-                  enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white70)),
-                  labelText: 'New Password',
-                  labelStyle: TextStyle(color: Colors.white70),
-                ),
-                onChanged: ((value) => {
-                  setState(() {
-                    _passwordNew = value;
-                  })
-                }),
-              ),
-            ),
-
-
             Divider(color: Colors.white38,
                 thickness: 1,
                 height: 40),
@@ -937,111 +1336,118 @@ class _BranchEditPageState extends State<BranchEditPage> with AutomaticKeepAlive
                 padding: EdgeInsets.only(
                     left: 10, top: 0, bottom: 10),
                 child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Icon(Icons.account_tree_outlined, color: Colors.white,
-                      size: 22,),
-                    Text(' 사업장 리스트',
-                      style: TextStyle(
-                        fontSize: 17, color: Colors.white,),
-                      textAlign: TextAlign.center,),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Icon(Icons.account_tree_outlined, color: Colors.white,
+                          size: 22,),
+                        Text(' 사업장 리스트',
+                          style: TextStyle(
+                            fontSize: 17, color: Colors.white,),
+                          textAlign: TextAlign.center,),
+                      ],
+                    ),
+                    TextButton(
+                        onPressed: (){
+                          setState(() {
+                            _branchList.add('');
+                            _branchEditControls.add(TextEditingController());
+                            _scrollController.animateTo(
+                              _scrollController.position.maxScrollExtent + 100,
+                              duration: const Duration(seconds: 1),
+                              curve: Curves.fastOutSlowIn,
+                            );
+                          });
+                        },
+                        child: Container(
+                            child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  Text('사업장 추가 ',style: TextStyle(color: Colors.white70,fontSize: 16),),
+                                  Icon(Icons.add, color: Colors.white,),
+                                ]
+                            )
+                        )
+                    )
                   ],
-                )
+              )
             ),
           ],
         );
       }
-          else if(index == _branchList.length + 1){
-            return TextButton(
-                onPressed: (){
-                  setState(() {
-                    _branchList.add('');
-                    _branchEditControls.add(TextEditingController());
-                    _scrollController.animateTo(
-                      _scrollController.position.maxScrollExtent + 100,
-                      duration: const Duration(seconds: 1),
-                      curve: Curves.fastOutSlowIn,
-                    );
-                  });
-                },
-                child: Container(
-                  margin: EdgeInsets.only(bottom: 30),
-                  child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        Text('사업장 추가 ',style: TextStyle(color: Colors.white70,fontSize: 16),),
-                        Icon(Icons.add, color: Colors.white,),
-                      ]
-                  )
-                )
-            );
-          }
-          else{
-            int brIdx = index - 1;
-            brIdx = max(brIdx, 0);
-            return
-              Container(
-                    margin: const EdgeInsets.all(10),
-                    padding: const EdgeInsets.only(left: 10),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.all(Radius.circular(5)),
-                      border: Border.all(
-                          color: Colors.white70
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child:  TextFormField(
-                            decoration: InputDecoration(
-                              enabledBorder: UnderlineInputBorder(
-                                borderSide: BorderSide(
-                                    color: Colors.transparent),
-                              ),
-                              focusedBorder: UnderlineInputBorder(
-                                borderSide: BorderSide(
-                                    color: Colors.transparent),
-                              ),
-                            ),
-                            style: TextStyle(color: Colors.white70),
-                            controller: _branchEditControls[brIdx],
-                            onChanged: ((value){
-                              setState(() {
-                                if(_branchListOrg.contains(_branchList[brIdx])){
-                                  _removeBranchList.add(_branchList[brIdx]);
-                                }
-                                _branchList[brIdx] = value;
-                              });
-                            }),
+      else if(index == _branchList.length + 1){
+        return buildDeleteAccount();
+      }
+      else{
+        int brIdx = index - 1;
+        brIdx = max(brIdx, 0);
+        return
+          Container(
+                margin: const EdgeInsets.all(10),
+                padding: const EdgeInsets.only(left: 10),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.all(Radius.circular(5)),
+                  border: Border.all(
+                      color: Colors.white70
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child:  TextFormField(
+                        decoration: InputDecoration(
+                          enabledBorder: UnderlineInputBorder(
+                            borderSide: BorderSide(
+                                color: Colors.transparent),
+                          ),
+                          focusedBorder: UnderlineInputBorder(
+                            borderSide: BorderSide(
+                                color: Colors.transparent),
                           ),
                         ),
-                        IconButton(
-                          icon: Icon(Icons.close_rounded, size: 18, color: Colors.white70,),
-                          onPressed: (){
-                            setState(() {
+                        style: TextStyle(color: Colors.white70),
+                        controller: _branchEditControls[brIdx],
+                        onChanged: ((value){
+                          setState(() {
+                            if(_branchListOrg.contains(_branchList[brIdx])){
                               _removeBranchList.add(_branchList[brIdx]);
-                              _branchList.removeAt(brIdx);
-                              _branchEditControls.removeAt(brIdx);
-                            });
-                          },
-                        ),
-                    ],
-                  )
-              );
-            }
+                            }
+                            _branchList[brIdx] = value;
+                          });
+                        }),
+                      ),
+                    ),
+                    IconButton(
+                      icon: Icon(Icons.close_rounded, size: 18, color: Colors.white70,),
+                      onPressed: (){
+                        setState(() {
+                          _removeBranchList.add(_branchList[brIdx]);
+                          _branchList.removeAt(brIdx);
+                          _branchEditControls.removeAt(brIdx);
+                        });
+                      },
+                    ),
+                ],
+              )
+          );
         }
+      }
     );
   }
 }
 
 
 class BranchPage extends StatefulWidget{
-  BranchPage({required this.company, required this.branch, required this.stream });
+  BranchPage({required this.company, required this.branch, required this.stream, required this.lowestPay, required this.bottomStream });
   final String company;
   final String branch;
   final Stream<int> stream;
+  final double lowestPay;
+  final Stream<int> bottomStream;
 
   exportData(BuildContext context) {
     _BranchPageState? state = context.findAncestorStateOfType<_BranchPageState>();
@@ -1059,8 +1465,38 @@ class _BranchPageState extends State<BranchPage> with AutomaticKeepAliveClientMi
   late List<workerData> workerList = [];
   late bool _initDone = false;
   late List<ExpenseInfo> listExpenseInfo = [];
+  late int _bottomTabIndex = 0;
 
   TextEditingController _payEditingController = TextEditingController();
+  String get _currency => NumberFormat.currency(locale: 'ko', symbol: '₩').currencySymbol;
+
+  late bool initDone = false;
+  late int initDone2ndCnt = 0;
+  late int initUserCnt = 0;
+  late int userCnt = 0;
+  late ScrollController _scrollController = ScrollController();
+  late Map<DateTime, DiaryContent> _listDiaryContent = {};
+  late DateTime _currentDate = DateTime.now().subtract(Duration(days: 30));
+
+  late Map<DateTime, GlobalKey> globalKeys = {};
+  late var sortedKeys;
+  late List<DateTime> days = [];
+  late List<String> userIdList = [];
+  late Map<String, bool> filterBranch = {};
+  late Map<String, bool> filterType = {};
+  late bool filterTypeAll = true;
+
+  late Map<String, bool> filterTypeView = {};
+  late bool filterTypeAllView = true;
+  late Map<DateTime, int> nothingToShow = {};
+  late Map<int, DateTime> scrollToDate = {};
+  late double prevScrollOffset = 0;
+  late double prevScrollMax = 0;
+
+  final ItemScrollController itemScrollController = ItemScrollController();
+  final ItemPositionsListener itemPositionsListener = ItemPositionsListener.create();
+  final List<String> diaryType = ['근무현황','지출현황','체크리스트','업무일지'];
+
   @override
   bool get wantKeepAlive => true;
 
@@ -1068,6 +1504,14 @@ class _BranchPageState extends State<BranchPage> with AutomaticKeepAliveClientMi
   initState() {
     super.initState();
     _companyName = widget.company;
+
+    for (int i = 0; i < 10; i++) {
+      days.add(DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day).subtract(Duration(days: i)));
+    }
+
+    diaryType.forEach((element) {
+      filterTypeView[element] = true;
+    });
     //workerList.clear();
     getWorkerList(widget.branch);
     /*
@@ -1098,17 +1542,205 @@ class _BranchPageState extends State<BranchPage> with AutomaticKeepAliveClientMi
         }
       }
     });
+
+    widget.bottomStream.listen((index){
+      if(index < 3){
+        setState((){
+          _bottomTabIndex = index;
+        });
+      }
+    });
+
+
+    _scrollController.addListener(() {
+      double scrollOffset = _scrollController.offset;
+      if(scrollOffset < 0){
+        scrollOffset = 0;
+      }
+      if(scrollToDate[scrollOffset ~/ 10] != _currentDate && scrollToDate[scrollOffset ~/ 10] != null){
+        setState((){
+          //print(_scrollController.offset ~/ 10);
+          _currentDate = scrollToDate[scrollOffset ~/ 10]!;
+          prevScrollOffset = scrollOffset;
+        });
+      }
+
+      if(_scrollController.position.pixels == _scrollController.position.maxScrollExtent && days.length < 100){
+        DateTime lastdate = days[days.length - 1];
+        for (int i = 1; i <= 10; i++) {
+          setState((){
+            DateTime addDate = lastdate.subtract(Duration(days: i));
+            days.add(addDate);
+            //getDiaryInfo(addDate);
+          });
+        }
+      }
+    });
+
+
+    itemPositionsListener.itemPositions.addListener(() {
+      var positions = itemPositionsListener.itemPositions.value;
+      var maxScroll = _scrollController.position.maxScrollExtent;
+      if (initDone && positions.isNotEmpty) {
+        if(prevScrollMax != maxScroll){
+          setState(() {
+            prevScrollMax = maxScroll;
+            int curIdx = 0;
+            double height = 0;
+            scrollToDate.clear();
+            for(double h = 0; h < maxScroll; h += 10){
+              if(curIdx < days.length){
+                if(days[curIdx] != null){
+                  var date = days[curIdx];
+                  //print('date ' + date.toString());
+                  if(globalKeys[date] != null && globalKeys[date]!.currentContext != null) {
+                    RenderBox? box = globalKeys[date]!.currentContext!
+                        .findRenderObject() as RenderBox;
+                    if (box != null) {
+                      if(height == 0){
+                        height = box.size.height;
+                        //print(height);
+                      }
+
+                      if(h < height - 50){
+                        scrollToDate[h ~/ 10] = days[curIdx];
+                        //print(h.toString() + ' / ' + days[curIdx].toString());
+                      }
+                      else{
+                        curIdx++;
+                        if(curIdx < days.length){
+                          var nextDate = days[curIdx];
+                          if(globalKeys[nextDate] != null && globalKeys[nextDate]!.currentContext != null) {
+                            RenderBox? nextbox = globalKeys[nextDate]!.currentContext!
+                                .findRenderObject() as RenderBox;
+                            if(nextbox != null){
+                              height += nextbox.size.height + 1;
+                            }
+                          }
+                        }
+                      }
+                    }
+                    else{
+                      curIdx++;
+                    }
+                  }
+                  else{
+                    curIdx++;
+                    if(curIdx < days.length){
+                      var nextDate = days[curIdx];
+                      if(globalKeys[nextDate] != null && globalKeys[nextDate]!.currentContext != null) {
+                        RenderBox? nextbox = globalKeys[nextDate]!.currentContext!
+                            .findRenderObject() as RenderBox;
+                        if(nextbox != null){
+                          height += nextbox.size.height + 1;
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+
+            if(_currentDate != scrollToDate[_scrollController.offset ~/ 10] && scrollToDate[_scrollController.offset ~/ 10] != null){
+              setState(() {
+                _currentDate = scrollToDate[_scrollController.offset ~/ 10]!;
+              });
+            }
+          });
+/*
+          days.forEach((date) {
+            if(globalKeys[date] != null && globalKeys[date]!.currentContext != null) {
+              RenderBox? box = globalKeys[date]!.currentContext!
+                  .findRenderObject() as RenderBox;
+              if (box != null) {
+                print(date.toString() + ' : ' + box!.size.height.toString());
+              }
+            }
+          });
+
+ */
+/*
+          scrollToDate.forEach((key, value) {
+            print('scroll : $key , date : $value');
+          });
+
+ */
+        }
+      }
+    });
   }
 
 
   Widget build(BuildContext context) {
-    return getUserList();
+    if(_bottomTabIndex == 0){
+      return getUserList();
+    }
+    else if(_bottomTabIndex == 1){
+      return buildBranchTimeline();
+    }
+    else{
+      return Container();
+    }
   }
 
 
   getWorkerList(String branch){
-    final double _lowestPay = 9160;
+    final double _lowestPay = widget.lowestPay;
     double payHour = _lowestPay;
+    BranchDatabase.getBranchCheckListCollection(
+        companyId: _companyName, branch: branch).get().then((
+        QuerySnapshot querySnapshot2) {
+      List<CheckListItem> checkList = [];
+      for (int i = 0; i < querySnapshot2.docs.length; i++) {
+        var data = querySnapshot2.docs[i].data()! as Map<String, dynamic>;
+        String title = "";
+        DateTime writetime = DateTime.now();
+        Map<DateTime, String> checked = {};
+        data.forEach((key, value) {
+          if (key == 'name') {
+            if (value != null && value.length > 0) {
+              title = value;
+            }
+          }
+          else if (key == 'writetime') {
+            if (value != null && value.length > 0) {
+              writetime = DateFormat('yyyy-MM-dd').parse(value);
+            }
+          }
+          else {
+            if (value != null) {
+              DateTime date = DateFormat('yyyy-MM-dd').parse(key);
+              if (date != null && date.isBefore(DateTime.now()))
+                checked[date] = value;
+            }
+          }
+        });
+        setState(() {
+          checkList.add(CheckListItem(
+              name: title, writetime: writetime, checked: checked));
+        });
+      }
+
+      checkList.forEach((element) {
+        element.checked.forEach((key2, value2) {
+          setState(() {
+            if(_listDiaryContent[key2] == null){
+              _listDiaryContent[key2] = DiaryContent();
+            }
+
+            if(_listDiaryContent[key2]!.mapBranchCheckListDone[widget.branch] == null){
+              _listDiaryContent[key2]!.mapBranchCheckListDone[widget.branch] = {};
+            }
+
+            _listDiaryContent[key2]!.mapBranchCheckListDone[widget.branch]![element.name] = value2;
+          });
+        });
+      });
+      setState(() {
+        initDone2ndCnt++;
+      });
+    });
+
     UserDatabase.getItemCollection(companyId: _companyName, userUid: 'Administrator').get().then((QuerySnapshot querySnapshot) {
       for(int i = 0; i < querySnapshot.docs.length; i++){
         var doc = querySnapshot.docs[i];
@@ -1118,6 +1750,12 @@ class _BranchPageState extends State<BranchPage> with AutomaticKeepAliveClientMi
               try {
                 if (doc['pay'] != null) {
                   payHour = double.parse((doc['pay']));
+                  if(payHour < _lowestPay){
+                    UserDatabase.addAdminUserItem(companyId: _companyName,
+                        userUid: doc.id,
+                        key: 'pay',
+                        value: _lowestPay.toString());
+                  }
                 }
               }
               catch (e) {
@@ -1134,6 +1772,75 @@ class _BranchPageState extends State<BranchPage> with AutomaticKeepAliveClientMi
                     setState((){
                       workerList.sort((a,b) => b.totalDuration[1].compareTo(a.totalDuration[1]));
                       workerList.sort((a,b) => b.totalDuration[0].compareTo(a.totalDuration[0]));
+                      element.startMap.forEach((date, start) {
+                        if(globalKeys[date] == null){
+                          setState((){
+                            globalKeys[date] = GlobalKey();
+                            sortedKeys = globalKeys.keys.toList()..sort();
+                          });
+                        }
+                        var end = element.endMap[date]??'';
+                        var duration =(element.durationMap[date]??0).toString();
+                        if (start != null && start.length > 0 &&
+                            date.isBefore(DateTime.now())) {
+                          if (end == start) {
+                            end = '';
+                          }
+                          var dur = '0';
+                          if (duration != null && duration.length > 0) {
+                            dur = duration;
+                          }
+
+                          setState(() {
+                            if (_listDiaryContent[date] == null)
+                              _listDiaryContent[date] = DiaryContent();
+                            if (_listDiaryContent[date]!.mapBranchUserTime[branch] == null) {
+                              _listDiaryContent[date]!.mapBranchUserTime[branch] = {};
+                            }
+                            _listDiaryContent[date]!.mapBranchUserTime[branch]![element.name] = ('근무 ' + dur + '시간/' + start + ' ~ ' + end);
+                          });
+
+                          if(_currentDate == null){
+                            setState((){
+                              _currentDate = date;
+                            });
+                          }
+                          else{
+                            if(_currentDate.isBefore(date)){
+                              setState((){
+                                _currentDate = date;
+                              });
+                            }
+                          }
+                        }
+
+                        element.textMap.forEach((date, text) {
+                          if ( text.length > 0) {
+                            setState(() {
+                              if (_listDiaryContent[date] == null)
+                                _listDiaryContent[date] = DiaryContent();
+                              if (_listDiaryContent[date]!.mapBranchUserDiary[branch] ==
+                                  null) {
+                                _listDiaryContent[date]!.mapBranchUserDiary[branch] = {};
+                              }
+                              _listDiaryContent[date]!.mapBranchUserDiary[branch]![element.name] =
+                                  text;
+                            });
+                            if(_currentDate == null){
+                              setState((){
+                                _currentDate = date;
+                              });
+                            }
+                            else{
+                              if(_currentDate.isBefore(date)){
+                                setState((){
+                                  _currentDate = date;
+                                });
+                              }
+                            }
+                          }
+                        });
+                      });
                   });
                 },
                 onExpenseReadComplete: (worker, date, exItems){
@@ -1149,6 +1856,39 @@ class _BranchPageState extends State<BranchPage> with AutomaticKeepAliveClientMi
                       listExpenseInfo.sort((a,b) => a.user!.compareTo(b.user!));
                       listExpenseInfo.sort((a,b) => a.date!.compareTo(b.date!));
                     });
+                  });
+
+
+                  setState(() {
+                    if (_listDiaryContent[date] == null)
+                      _listDiaryContent[date] = DiaryContent();
+                    if (_listDiaryContent[date]!.mapBranchUserExpense[branch] ==
+                        null) {
+                      _listDiaryContent[date]!.mapBranchUserExpense[branch] = {};
+                    }
+                    if (_listDiaryContent[date]!
+                        .mapBranchUserExpense[branch]![worker.name] == null) {
+                      if(exItems != null && exItems.length > 0){
+                        _listDiaryContent[date]!.mapBranchUserExpense[branch]![worker.name] = exItems;
+                      }
+                    }
+
+                  });
+
+                  if(_currentDate == null){
+                    setState((){
+                      _currentDate = date;
+                    });
+                  }
+                  else{
+                    if(_currentDate.isBefore(date)){
+                      setState((){
+                        _currentDate = date;
+                      });
+                    }
+                  }
+                  setState(() {
+                    initDone = true;
                   });
                 }
                 );
@@ -1166,35 +1906,89 @@ class _BranchPageState extends State<BranchPage> with AutomaticKeepAliveClientMi
 
   Widget getUserList(){
     return Container(
-      color: Colors.black26,
-      child:  Column(
-        children: <Widget>[
-          Container(
-            alignment: Alignment.centerLeft,
-            child: totalPayLatest(),
-          ),
-          Expanded(child: ListView.separated(itemCount: workerList.length + 1,
-              separatorBuilder: (BuildContext context, int index) {
-                return Divider(height: 10.0, color: Colors.white.withOpacity(0.24),thickness: 1,);
+      color: Colors.black38,
+      child:  ListView.separated(itemCount: workerList.length + 2,
+          separatorBuilder: (BuildContext context, int index) {
+            return Divider(height: 5.0,
+                color: Colors.black38,
+                thickness: 5);
+          },
+          itemBuilder: (BuildContext context, int index){
+            if(index == workerList.length + 1){
+              return ListTile(
 
-              },
-              itemBuilder: (BuildContext context, int index){
-                if(index == workerList.length){
-                  return ListTile(
-
-                  );
-                }
-                else{
-                  return getWorkerTile(index);
-                }
-              })
-          ),
-        ],
-      ),
+              );
+            }
+            else if(index == 0){
+              return totalPayLatest();
+            }
+            else{
+              return getWorkerTile(index - 1);
+            }
+          })
     );
   }
 
   Widget totalPayLatest(){
+    return ListTile(
+      tileColor: Colors.black38,
+      title: SizedBox(
+        height: 30,
+        child: Container(
+          alignment: Alignment.centerLeft,
+          child: Text(widget.branch + ' 합계',style: TextStyle(color: Colors.indigo[300], fontWeight: FontWeight.bold, fontSize: 15), textAlign: TextAlign.left),
+        )
+      ),
+      subtitle: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            constraints: BoxConstraints(minWidth: 140),
+            padding: EdgeInsets.all(3),
+            margin: EdgeInsets.all(3),
+            decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                color: Colors.indigo
+            ),
+            child: Column(
+              children: [
+                Text(getMonthPrint(false),style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('급여 : ' + NumberFormat.currency(locale: "ko_KR", symbol: "").format(sumTotalPayOfBranch(0)) + '원', style: TextStyle(color: Colors.white)),
+                    Text('지출 : ' + NumberFormat.currency(locale: "ko_KR", symbol: "").format(getMonthlySumExpense(DateTime.now().month)) + '원', style: TextStyle(color: Colors.white))
+                  ],
+                )
+              ],
+            ),
+          ),
+          SizedBox(width: 5,),
+          Container(
+            constraints: BoxConstraints(minWidth: 140),
+            padding: EdgeInsets.all(3),
+            margin: EdgeInsets.all(3),
+            decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                color: Colors.white12
+            ),
+            child:  Column(
+              children: [
+                Text(getMonthPrint(true),style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold)),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('급여 : ' + NumberFormat.currency(locale: "ko_KR", symbol: "").format(sumTotalPayOfBranch(1)) + '원', style: TextStyle(color: Colors.white70)),
+                    Text('지출 : ' + NumberFormat.currency(locale: "ko_KR", symbol: "").format(getMonthlySumExpense(((DateTime.now().month - 1) == 0) ? 12 : (DateTime.now().month - 1))) + '원', style: TextStyle(color: Colors.white70))
+                  ],
+                )
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1238,120 +2032,183 @@ class _BranchPageState extends State<BranchPage> with AutomaticKeepAliveClientMi
     return  ListTile(
         //dense: true,
         isThreeLine: true,
-        title:Text(workerList[index].name,style: TextStyle(color: Colors.teal[200], fontWeight: FontWeight.bold), textAlign: TextAlign.left),
-        subtitle : Text(workerList[index].getUserInfoPrint(),style: TextStyle(color: Colors.white70),),
-        trailing: IconButton(
-          color: Colors.white70,
-          onPressed: (){
-            _payEditingController.text = (workerList[index].payHour).toString();
-            showDialog<String>(
-              context: context,
-              builder: (BuildContext context) => AlertDialog(
-                backgroundColor: Color(0xFF333A47),
-                title: Row(
-                  children: [
-                    const Expanded(
-                      child: Text('User Info', style: TextStyle(color: Colors.white70),),
-                    ),
-                    Container(
-                      child:IconButton(icon: Icon(Icons.calendar_today_outlined),
-                          color: Colors.white70,
-                          onPressed: (){
-                            Navigator.pop(context, 'Calendar');
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(builder: (context) =>
-                                  TimeLinePage(
-                                      title: "My Working time", companyId: _companyName, user: workerList[index].name.trim(), workplace: workerList[index].workPlace)),
-                            );
-                          }),
-                    ),
-                  ],
-                ),
-
-                content: Container(
-                  height: 170,
-                  child: Column(children: [
-                    Container(alignment: Alignment.centerLeft, margin: const EdgeInsets.all(10),
-                      child: Text('이름 : ' + workerList[index].name ,style: TextStyle(color: Colors.white70),),),
-                    Container(alignment: Alignment.centerLeft, margin: const EdgeInsets.all(10),
-                      child: Text('소속 : ' + workerList[index].workPlace ,style: TextStyle(color: Colors.white70),),),
-                    Container(
-                      margin: const EdgeInsets.all(10),
-                      child:TextFormField(
-                        style: TextStyle(fontSize: 15, color: Colors.white70),
-                        keyboardType: TextInputType.number,
-                        inputFormatters: <TextInputFormatter>[FilteringTextInputFormatter.digitsOnly],
-                        onChanged: (value) {
-                          _payPerHourInput = value;
-                        },
-
-                        decoration: const InputDecoration(
-                            border: OutlineInputBorder(borderSide: BorderSide(color: Colors.white70)),
-                            enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white70)),
-                            labelText: '시급',
-                            labelStyle: TextStyle(color: Colors.white70)
+        title:
+        Container(
+          alignment: Alignment.centerLeft,
+          child: SizedBox(
+            height: 30,
+            child: TextButton(
+              style: TextButton.styleFrom(
+                padding: EdgeInsets.zero,
+                alignment: Alignment.centerLeft
+              ),
+              child:Text(workerList[index].name,style: TextStyle(color: Colors.teal[200], fontWeight: FontWeight.bold, fontSize: 15), textAlign: TextAlign.left),
+              onPressed: (){
+                _payEditingController.text = NumberFormat.currency(locale: 'ko' ,symbol: '').format(workerList[index].payHour);
+                showDialog<String>(
+                  context: context,
+                  builder: (BuildContext context) => AlertDialog(
+                    backgroundColor: Color(0xFF333A47),
+                    title: Row(
+                      children: [
+                        const Expanded(
+                          child: Text('직원 정보', style: TextStyle(color: Colors.white70),),
                         ),
-                        controller: _payEditingController,
-                      ) ,),
-
-                  ],) ,
-                ),
-
-                actions: <Widget>[
-
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Container(
-                        child: TextButton(
-                          onPressed: (){
-                            showDialog<String>(
-                              context: context,
-                              builder: (BuildContext context) => AlertDialog(
-                                backgroundColor: Color(0xFF333A47),
-                                title: const Text('Delete User', style: TextStyle(color: Colors.white70),),
-                                content: Text(workerList[index].getUserId(), style: TextStyle(color: Colors.white70)),
-                                actions: <Widget>[
-                                  deleteWorkerButton(index),
-                                  TextButton(
-                                    onPressed: () => Navigator.pop(context, 'Cancel'),
-                                    child: const Text('Cancel', style: TextStyle(color: Colors.white70),),
-                                  ),
-                                ],
-                              ),);
-                          },
-                          child: const Text('Delete', style: TextStyle(color: Colors.redAccent)),
-                        ),
-                      ),
-                      Container(
-                        child: Row(
-                          children: [
-                            TextButton(
+                        Container(
+                          child:IconButton(icon: Icon(Icons.calendar_today_outlined),
+                              color: Colors.white70,
                               onPressed: (){
-                                setState(() {
-                                  workerList[index].updatePay(double.parse(_payPerHourInput));
-                                  UserDatabase.addAdminUserItem(companyId: _companyName, userUid: workerList[index].getUserId() , key: 'pay', value: _payPerHourInput);
-                                });
-                                Navigator.pop(context, 'Ok');
-                              },
-                              child: Text('Ok', style: TextStyle(color: Colors.teal[200])),
-                            ),
-                            TextButton(
-                              onPressed: () => Navigator.pop(context, 'Close'),
-                              child: Text('Close', style: TextStyle(color: Colors.teal[200]),),
-                            ),
-                          ],
+                                Navigator.pop(context, 'Calendar');
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(builder: (context) =>
+                                      TimeLinePage(
+                                          title: "My Working time", companyId: _companyName, user: workerList[index].name.trim(), workplace: workerList[index].workPlace)),
+                                );
+                              }),
                         ),
-                      )
+                      ],
+                    ),
 
+                    content: Container(
+                      height: 170,
+                      child: Column(children: [
+                        Container(alignment: Alignment.centerLeft, margin: const EdgeInsets.all(10),
+                          child: Text('이름 : ' + workerList[index].name ,style: TextStyle(color: Colors.white70),),),
+                        Container(alignment: Alignment.centerLeft, margin: const EdgeInsets.all(10),
+                          child: Text('소속 : ' + workerList[index].workPlace ,style: TextStyle(color: Colors.white70),),),
+                        Container(
+                          margin: const EdgeInsets.all(10),
+                          child:TextFormField(
+                            style: TextStyle(fontSize: 15, color: Colors.white70),
+                            keyboardType: TextInputType.number,
+                            decoration: InputDecoration(
+                              border: OutlineInputBorder(borderSide: BorderSide(color: Colors.white70)),
+                              enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white70)),
+                              labelText: '시급',
+                              labelStyle: TextStyle(color: Colors.white70),
+                              prefixText: _currency,
+                              prefixStyle: TextStyle(color: Colors.white70),
+                            ),
+                            controller: _payEditingController,
+                            inputFormatters: [
+                              ThousandsFormatter(allowFraction: true)
+                            ],
+                          ) ,),
+
+                      ],) ,
+                    ),
+
+                    actions: <Widget>[
+
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Container(
+                            child: TextButton(
+                              onPressed: (){
+                                showDialog<String>(
+                                  context: context,
+                                  builder: (BuildContext context) => AlertDialog(
+                                    backgroundColor: Color(0xFF333A47),
+                                    title: const Text('Delete User', style: TextStyle(color: Colors.white70),),
+                                    content: Text(workerList[index].getUserId(), style: TextStyle(color: Colors.white70)),
+                                    actions: <Widget>[
+                                      deleteWorkerButton(index),
+                                      TextButton(
+                                        onPressed: () => Navigator.pop(context, 'Cancel'),
+                                        child: const Text('Cancel', style: TextStyle(color: Colors.white70),),
+                                      ),
+                                    ],
+                                  ),);
+                              },
+                              child: const Text('Delete', style: TextStyle(color: Colors.redAccent)),
+                            ),
+                          ),
+                          Container(
+                            child: Row(
+                              children: [
+                                TextButton(
+                                  onPressed: (){
+                                    setState(() {
+                                      _payPerHourInput = _payEditingController.text.replaceAll(',', '');
+                                      if(double.parse(_payPerHourInput) < widget.lowestPay){
+                                        _payPerHourInput = widget.lowestPay.toString();
+                                        Fluttertoast.showToast(msg: '최저시급(${NumberFormat.currency(locale: 'ko' ,symbol: '').format(widget.lowestPay)}원)보다 낮게 설정할 수 없습니다.');
+                                        UserDatabase.addAdminUserItem(companyId: _companyName, userUid: workerList[index].getUserId() , key: 'pay', value: widget.lowestPay.toString());
+                                      }
+                                      workerList[index].updatePay(double.parse(_payPerHourInput));
+                                      UserDatabase.addAdminUserItem(companyId: _companyName, userUid: workerList[index].getUserId() , key: 'pay', value: _payPerHourInput);
+                                    });
+                                    Navigator.pop(context, 'Ok');
+                                  },
+                                  child: Text('Ok', style: TextStyle(color: Colors.teal[200])),
+                                ),
+                                TextButton(
+                                  onPressed: () => Navigator.pop(context, 'Close'),
+                                  child: Text('Close', style: TextStyle(color: Colors.teal[200]),),
+                                ),
+                              ],
+                            ),
+                          )
+
+                        ],
+                      )
+                    ],
+                  ),);
+              },
+            ),
+          ),
+        ),
+
+        subtitle : Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              constraints: BoxConstraints(minWidth: 140),
+              padding: EdgeInsets.all(3),
+              margin: EdgeInsets.all(3),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                color: Colors.white12
+              ),
+              child: Column(
+                children: [
+                  Text(getMonthPrint(false),style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold)),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('근무 : ' + workerList[index].totalDuration[0].toString() + '시간', style: TextStyle(color: Colors.white70)),
+                      Text('급여 : ' + NumberFormat.currency(locale: "ko_KR", symbol: "").format(workerList[index].latestPayMonth[0]) + '원', style: TextStyle(color: Colors.white70))
                     ],
                   )
                 ],
-              ),);
-          },
-          icon: Icon(Icons.more_vert),
-        )
+              ),
+            ),
+            SizedBox(width: 5,),
+            Container(
+              constraints: BoxConstraints(minWidth: 140),
+              padding: EdgeInsets.all(3),
+              margin: EdgeInsets.all(3),
+              decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(10),
+                  color: Colors.white12
+              ),
+              child:  Column(
+                children: [
+                  Text(getMonthPrint(true),style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold)),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('근무 : ' + workerList[index].totalDuration[1].toString() + '시간', style: TextStyle(color: Colors.white70)),
+                      Text('급여 : ' + NumberFormat.currency(locale: "ko_KR", symbol: "").format(workerList[index].latestPayMonth[1]) + '원', style: TextStyle(color: Colors.white70))
+                    ],
+                  )
+                ],
+              ),
+            ),
+          ],
+        ) ,
     );
   }
 
@@ -1431,6 +2288,10 @@ class _BranchPageState extends State<BranchPage> with AutomaticKeepAliveClientMi
       xlsio.Style globalStyle = workbook.styles.add('style');
       globalStyle.borders.all.lineStyle = xlsio.LineStyle.thin;
 
+      xlsio.Style weekendStyle = workbook.styles.add('weekendstyle');
+      weekendStyle.fontColor = '#FF0000';
+      weekendStyle.borders.all.lineStyle = xlsio.LineStyle.thin;
+
       for(int a = maxYearMonth; a>=minYearMonth; a--){
         xlsio.Worksheet sheet;
         sheetName = (a~/12).toString() + "년" + (a % 12 + 1).toString() + "월";
@@ -1449,9 +2310,15 @@ class _BranchPageState extends State<BranchPage> with AutomaticKeepAliveClientMi
         cell.setText((a % 12 + 1).toString() + '월 출석부');
 
         double d = 1;
-        for(int a = gridRowOffset; a < gridRowOffset + 31; a++) {
-          var cell = sheet.getRangeByIndex(a + 1, 1);
+        for(int i = gridRowOffset; i < gridRowOffset + 31; i++) {
+          var cell = sheet.getRangeByIndex(i + 1, 1);
           cell.setNumber(d);
+          if((DateTime(a~/12,(a%12 + 1),d.toInt()).weekday == 6) || (DateTime(a~/12,(a%12 + 1),d.toInt()).weekday == 7)){
+            cell.cellStyle = weekendStyle;
+          }
+          else{
+            cell.cellStyle = globalStyle;
+          }
           d += 1;
         }
 
@@ -1464,21 +2331,29 @@ class _BranchPageState extends State<BranchPage> with AutomaticKeepAliveClientMi
 
           cell = sheet.getRangeByIndex(32 + gridRowOffset, 1);
           cell.setText("합계");
+          cell.cellStyle = globalStyle;
 
           cell = sheet.getRangeByIndex(33 + gridRowOffset, 1);
           cell.setText("시급");
+          cell.cellStyle = globalStyle;
 
           cell = sheet.getRangeByIndex(34 + gridRowOffset, 1);
-          cell.setText("급여");
+          cell.setText("주휴수당");
+          cell.cellStyle = globalStyle;
 
           cell = sheet.getRangeByIndex(35 + gridRowOffset, 1);
-          cell.setText("급여 3.3%");
+          cell.setText("급여");
+          cell.cellStyle = globalStyle;
 
           cell = sheet.getRangeByIndex(36 + gridRowOffset, 1);
-          cell.setText("총급여");
+          cell.setText("급여 3.3%");
           cell.cellStyle = globalStyle;
 
           cell = sheet.getRangeByIndex(37 + gridRowOffset, 1);
+          cell.setText("총급여");
+          cell.cellStyle = globalStyle;
+
+          cell = sheet.getRangeByIndex(38 + gridRowOffset, 1);
           cell.setText("총급여 3.3%");
           cell.cellStyle = globalStyle;
 
@@ -1493,74 +2368,74 @@ class _BranchPageState extends State<BranchPage> with AutomaticKeepAliveClientMi
           cell = sheet.getRangeByIndex(33 + gridRowOffset, userCnt + 1);
           cell.setNumber(key.payHour);
 
-          cell = sheet.getRangeByIndex(34 + gridRowOffset, userCnt + 1);
-          sumFormula = '=PRODUCT(' + sheet.getRangeByIndex(32 + gridRowOffset, userCnt + 1).addressLocal + ',' + sheet.getRangeByIndex(33 + gridRowOffset, userCnt + 1).addressLocal + ')';
+          cell = sheet.getRangeByIndex(35 + gridRowOffset, userCnt + 1);
+          sumFormula = '=SUM(PRODUCT(' + sheet.getRangeByIndex(32 + gridRowOffset, userCnt + 1).addressLocal + ',' + sheet.getRangeByIndex(33 + gridRowOffset, userCnt + 1).addressLocal + '),' + sheet.getRangeByIndex(34 + gridRowOffset, userCnt + 1).addressLocal + ')';
           cell.setFormula(sumFormula);
           cell.numberFormat = '(\$#,##0.00)';
 
-          cell = sheet.getRangeByIndex(35 + gridRowOffset, userCnt + 1);
-          sumFormula = '=PRODUCT(' + sheet.getRangeByIndex(34 + gridRowOffset, userCnt + 1).addressLocal + ',96.7) / 100';
+          cell = sheet.getRangeByIndex(36 + gridRowOffset, userCnt + 1);
+          sumFormula = '=PRODUCT(' + sheet.getRangeByIndex(35 + gridRowOffset, userCnt + 1).addressLocal + ',96.7) / 100';
           cell.setFormula(sumFormula);
 
 
         });
-        sheet.getRangeByIndex(gridRowOffset,1,35 + gridRowOffset, userCnt + 1).cellStyle = globalStyle;
+        sheet.getRangeByIndex(gridRowOffset,2,36 + gridRowOffset, userCnt + 1).cellStyle = globalStyle;
 
-        String sumStartCell = sheet.getRangeByIndex(34 + gridRowOffset, 2).addressLocal;
-        String sumEndCell = sheet.getRangeByIndex(34 + gridRowOffset, userCnt + 1).addressLocal;
-        cell = sheet.getRangeByIndex(36 + gridRowOffset, 2);
+        String sumStartCell = sheet.getRangeByIndex(35 + gridRowOffset, 2).addressLocal;
+        String sumEndCell = sheet.getRangeByIndex(35 + gridRowOffset, userCnt + 1).addressLocal;
+        cell = sheet.getRangeByIndex(37 + gridRowOffset, 2);
         String sumFormula = '=SUM(' + sumStartCell + ':' + sumEndCell + ')';
         cell.setFormula(sumFormula);
         cell.cellStyle = globalStyle;
 
-        sumStartCell = sheet.getRangeByIndex(35 + gridRowOffset, 2).addressLocal;
-        sumEndCell = sheet.getRangeByIndex(35 + gridRowOffset, userCnt + 1).addressLocal;
-        cell = sheet.getRangeByIndex(37 + gridRowOffset, 2);
+        sumStartCell = sheet.getRangeByIndex(36 + gridRowOffset, 2).addressLocal;
+        sumEndCell = sheet.getRangeByIndex(36 + gridRowOffset, userCnt + 1).addressLocal;
+        cell = sheet.getRangeByIndex(38 + gridRowOffset, 2);
         sumFormula = '=SUM(' + sumStartCell + ':' + sumEndCell + ')';
         cell.setFormula(sumFormula);
         cell.cellStyle = globalStyle;
 
-        cell = sheet.getRangeByIndex(39 + gridRowOffset, 1);
+        cell = sheet.getRangeByIndex(40 + gridRowOffset, 1);
         cell.setText("지출현황");
         cell.cellStyle = globalStyle;
 
         for(int i = 0; i < expenseType.length; i++) {
-          cell = sheet.getRangeByIndex(40 + gridRowOffset, 1 + i);
+          cell = sheet.getRangeByIndex(41 + gridRowOffset, 1 + i);
           cell.setText(expenseType[i]);
           cell.cellStyle = globalStyle;
         }
-        cell = sheet.getRangeByIndex(40 + gridRowOffset, 1 + expenseType.length);
+        cell = sheet.getRangeByIndex(41 + gridRowOffset, 1 + expenseType.length);
         cell.setText('합계');
         cell.cellStyle = globalStyle;
 
-        cell = sheet.getRangeByIndex(41 + gridRowOffset, 1 + expenseType.length);
-        sumStartCell = sheet.getRangeByIndex(41 + gridRowOffset, 1).addressLocal;
-        sumEndCell = sheet.getRangeByIndex(41 + gridRowOffset, expenseType.length).addressLocal;
+        cell = sheet.getRangeByIndex(42 + gridRowOffset, 1 + expenseType.length);
+        sumStartCell = sheet.getRangeByIndex(42 + gridRowOffset, 1).addressLocal;
+        sumEndCell = sheet.getRangeByIndex(42 + gridRowOffset, expenseType.length).addressLocal;
         sumFormula = '=SUM(' + sumStartCell + ':' + sumEndCell + ')';
         cell.setFormula(sumFormula);
         cell.cellStyle = globalStyle;
 
-        cell = sheet.getRangeByIndex(43 + gridRowOffset, 1);
+        cell = sheet.getRangeByIndex(44 + gridRowOffset, 1);
         cell.setText("지출내역");
         cell.cellStyle = globalStyle;
 
-        cell = sheet.getRangeByIndex(44 + gridRowOffset, 1);
+        cell = sheet.getRangeByIndex(45 + gridRowOffset, 1);
         cell.setText("일자");
         cell.cellStyle = globalStyle;
 
-        cell = sheet.getRangeByIndex(44 + gridRowOffset, 2);
+        cell = sheet.getRangeByIndex(45 + gridRowOffset, 2);
         cell.setText("담당자");
         cell.cellStyle = globalStyle;
 
-        cell = sheet.getRangeByIndex(44 + gridRowOffset, 3);
+        cell = sheet.getRangeByIndex(45 + gridRowOffset, 3);
         cell.setText("지출유형");
         cell.cellStyle = globalStyle;
 
-        cell = sheet.getRangeByIndex(44 + gridRowOffset, 4);
+        cell = sheet.getRangeByIndex(45 + gridRowOffset, 4);
         cell.setText("금액");
         cell.cellStyle = globalStyle;
 
-        cell = sheet.getRangeByIndex(44 + gridRowOffset, 5);
+        cell = sheet.getRangeByIndex(45 + gridRowOffset, 5);
         cell.setText("상세내역");
         cell.cellStyle = globalStyle;
       }
@@ -1583,6 +2458,35 @@ class _BranchPageState extends State<BranchPage> with AutomaticKeepAliveClientMi
             var cell = sheet.getRangeByIndex(day + gridRowOffset , userCnt + 1);
             if(value > 0)
               cell.setNumber(value);
+          }
+        });
+
+        Map<String, double> weekendPay = {};
+        key.weekDurationMap.forEach((key2, value2) {
+          year = key2.year;
+          month = key2.month;
+          day = key2.day;
+
+          if(value2 >= 15){
+            sheetName = year.toString() + "년" + month.toString() + "월";
+            if(sheetNameList.contains(sheetName)){
+              if(weekendPay[sheetName] == null){
+                weekendPay[sheetName] = 0;
+              }
+              var thisweekPay = value2 * 8 / 40 * key.payHour;
+              weekendPay[sheetName] = weekendPay[sheetName]! + thisweekPay;
+            }
+          }
+        });
+
+        weekendPay.forEach((sname, pay) {
+          xlsio.Worksheet sheet;
+          if(sheetNameList.contains(sname)){
+            sheet = workbook.worksheets[sname];
+            var cell = sheet.getRangeByIndex(34 + gridRowOffset , userCnt + 1);
+            if(pay > 0){
+              cell.setNumber(pay);
+            }
           }
         });
       });
@@ -1608,22 +2512,22 @@ class _BranchPageState extends State<BranchPage> with AutomaticKeepAliveClientMi
           if(sheetNameList.contains(sheetName)){
             xlsio.Worksheet sheet;
             sheet = workbook.worksheets[sheetName];
-            var cell = sheet.getRangeByIndex(45 + exIdx + gridRowOffset, 1);
+            var cell = sheet.getRangeByIndex(46 + exIdx + gridRowOffset, 1);
             cell.setNumber(exInfo.date!.day.toDouble());
             cell.cellStyle = globalStyle;
 
-            cell = sheet.getRangeByIndex(45 + exIdx + gridRowOffset, 2);
+            cell = sheet.getRangeByIndex(46 + exIdx + gridRowOffset, 2);
             cell.setText(exInfo.user);
             cell.cellStyle = globalStyle;
 
-            cell = sheet.getRangeByIndex(45 + exIdx + gridRowOffset, 3);
+            cell = sheet.getRangeByIndex(46 + exIdx + gridRowOffset, 3);
             cell.setText(exInfo.type);
             cell.cellStyle = globalStyle;
 
             if(exInfo.money!= null && exInfo.money!.length > 0){
               double m = double.parse(exInfo.money!.replaceAll(',', ''));
               if(m != null){
-                cell = sheet.getRangeByIndex(45 + exIdx + gridRowOffset, 4);
+                cell = sheet.getRangeByIndex(46 + exIdx + gridRowOffset, 4);
                 cell.setNumber(m);
                 if(exInfo.type == null){
                   exInfo.type = '기타';
@@ -1636,10 +2540,10 @@ class _BranchPageState extends State<BranchPage> with AutomaticKeepAliveClientMi
                 }
               }
             }
-            cell = sheet.getRangeByIndex(45 + exIdx + gridRowOffset, 4);
+            cell = sheet.getRangeByIndex(46 + exIdx + gridRowOffset, 4);
             cell.cellStyle = globalStyle;
 
-            cell = sheet.getRangeByIndex(45 + exIdx + gridRowOffset, 5);
+            cell = sheet.getRangeByIndex(46 + exIdx + gridRowOffset, 5);
             cell.setText(exInfo.detail);
             cell.cellStyle = globalStyle;
 
@@ -1654,7 +2558,7 @@ class _BranchPageState extends State<BranchPage> with AutomaticKeepAliveClientMi
 
           for(int i = 0; i < expenseType.length; i++){
             var type = expenseType[i];
-            var cell = sheet.getRangeByIndex(41 + gridRowOffset, 1 + i);
+            var cell = sheet.getRangeByIndex(42 + gridRowOffset, 1 + i);
             cell.setNumber(mapTotal[type]);
             cell.cellStyle = globalStyle;
           }
@@ -1665,6 +2569,583 @@ class _BranchPageState extends State<BranchPage> with AutomaticKeepAliveClientMi
 
       download(fileName, bytes);
       workbook.dispose();
+    }
+  }
+
+  Widget buildBranchTimeline(){
+    return Container(
+        color: Colors.black38,
+        child: Stack(
+          children: [
+            SingleChildScrollView(
+              controller: _scrollController,
+              child: ScrollablePositionedList.separated(
+                itemScrollController: itemScrollController,
+                itemPositionsListener: itemPositionsListener,
+                shrinkWrap: true,
+                physics: const ClampingScrollPhysics(),
+                itemCount: days.length,
+                itemBuilder: (BuildContext context, int index) {
+                  //DateTime date = sortedKeys.elementAt(index);
+                  return buildDiaryContent(days[index]);
+                },
+
+                separatorBuilder: (BuildContext context, int index) {
+                  if (IsSomethingShow(days[index]) && _listDiaryContent[days[index]] != null) {
+                    return Divider(height: 1,
+                        color: Colors.black38,
+                        thickness: 1);
+                  }
+                  else{
+                    return Container();
+                  }
+
+                },
+              ),
+            ),
+            Container(
+                color: Colors.black38,
+                child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        alignment: Alignment.center,
+                        padding: EdgeInsets.fromLTRB(10, 0, 0, 0),
+                        height: 30,
+                        color: Colors.black.withOpacity(0.5),
+                        child: Stack(
+                          children: [
+                            Container(
+                              alignment: Alignment.centerLeft,
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.start,
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  Text('  ' + DateFormat('yyyy-MM-dd').format(_currentDate) + ' ',
+                                    style: TextStyle(
+                                        color: Colors.indigo[300],
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.bold),
+                                  ),
+                                  Text(DateFormat('E', 'ko_KR').format(_currentDate),
+                                    style: TextStyle(
+                                        color: DateFormat('E', 'ko_KR')
+                                            .format(_currentDate) == '토' ||
+                                            DateFormat('E', 'ko_KR').format(
+                                                _currentDate) == '일' ? Colors
+                                            .redAccent[100] : Colors.indigo[300],
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.bold
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Container(
+                              alignment: Alignment.centerRight,
+                              child: IconButton(
+                                onPressed: (){
+                                  setState((){
+                                    filterTypeAll = filterTypeAllView;
+                                    filterType = {};
+                                    filterTypeView.forEach((key, value) {
+                                      filterType[key] = value;
+                                    });
+                                  });
+                                  showDialog<String>(
+                                    context: context,
+                                    builder: (BuildContext context) {
+                                      return StatefulBuilder(builder: (context, _setState){
+                                        return AlertDialog(
+                                          backgroundColor: Color(0xFF333A47),
+                                          title: Row(
+                                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                            children: [
+                                              Text('필터', style: TextStyle(color: Colors.white)),
+                                              Row(
+                                                children: [
+                                                  Text('전체', style: TextStyle(color: Colors.white70, fontSize: 14),),
+                                                  Switch(value: filterTypeAll, onChanged: (value){
+                                                    _setState((){
+                                                      filterTypeAll = value;
+                                                      filterType.forEach((key, value) {
+                                                        filterType[key] = filterTypeAll;
+                                                      });
+                                                    });
+                                                  })
+                                                ],
+                                              )
+                                            ],
+                                          ),
+                                          content:
+                                          Container(
+                                              height: 160,
+                                              width: MediaQuery.of(context).size.width - 100,
+                                              child:
+                                              ListView.builder(
+                                                shrinkWrap: true,
+                                                physics: const ClampingScrollPhysics(),
+                                                itemCount: diaryType.length,
+                                                itemBuilder: (BuildContext context, index){
+                                                  return Theme(
+                                                      data: ThemeData(unselectedWidgetColor: Colors.white70, scrollbarTheme: ScrollbarThemeData(isAlwaysShown: true )),
+                                                      child: SizedBox(
+                                                        height: 40,
+                                                        child: CheckboxListTile(
+                                                            value: filterType[diaryType[index]],
+                                                            activeColor: Colors.transparent,
+                                                            checkColor: Colors.white,
+                                                            controlAffinity: ListTileControlAffinity.leading,
+                                                            checkboxShape: RoundedRectangleBorder(
+                                                              borderRadius: BorderRadius.circular(3),
+                                                              side: BorderSide(color: Colors.white70),
+                                                            ),
+                                                            title: Text(diaryType[index], style: TextStyle(color: Colors.white70)),
+                                                            onChanged: (value){
+                                                              _setState((){
+                                                                filterType[diaryType[index]] = value!;
+                                                                if(value == false){
+                                                                  filterTypeAll = value;
+                                                                }
+                                                              });
+                                                            }),
+                                                      )
+                                                  );
+                                                },
+                                              )
+                                          ),
+                                          actions: <Widget>[
+                                            TextButton(
+                                              onPressed:
+                                              (() {
+                                                _setState((){
+                                                  filterTypeAllView = filterTypeAll;
+                                                  filterType.forEach((key, value) {
+                                                    if(value == false){
+                                                      filterTypeAllView = false;
+                                                    }
+                                                    filterTypeView[key] = value;
+                                                  });
+
+
+                                                  _currentDate = days[days.length - 1];
+                                                  _listDiaryContent.forEach((date, value) {
+                                                    if(filterTypeView['근무현황'] != null && filterTypeView['근무현황']!) {
+                                                      value.mapBranchUserTime.keys.forEach((element) {
+                                                        if (_currentDate == null) {
+                                                          setState(() {
+                                                            _currentDate = date;
+                                                          });
+                                                        }
+                                                        else {
+                                                          if (_currentDate.isBefore(date)) {
+                                                            setState(() {
+                                                              _currentDate = date;
+                                                            });
+                                                          }
+                                                        }
+                                                      });
+                                                    }
+                                                    if(filterTypeView['지출현황'] != null && filterTypeView['지출현황']!) {
+                                                      value.mapBranchUserExpense.keys.forEach((element) {
+                                                        if (_currentDate == null) {
+                                                          setState(() {
+                                                            _currentDate = date;
+                                                          });
+                                                        }
+                                                        else {
+                                                          if (_currentDate.isBefore(date)) {
+                                                            setState(() {
+                                                              _currentDate = date;
+                                                            });
+                                                          }
+                                                        }
+                                                      });
+                                                    }
+                                                    if(filterTypeView['체크리스트'] != null && filterTypeView['체크리스트']!) {
+                                                      value.mapBranchUserExpense.keys.forEach((element) {
+                                                        if (_currentDate == null) {
+                                                          setState(() {
+                                                            _currentDate = date;
+                                                          });
+                                                        }
+                                                        else {
+                                                          if (_currentDate.isBefore(date)) {
+                                                            setState(() {
+                                                              _currentDate = date;
+                                                            });
+                                                          }
+                                                        }
+                                                      });
+                                                    }
+                                                    if(filterTypeView['업무일지'] != null && filterTypeView['업무일지']!) {
+                                                      value.mapBranchUserExpense.keys.forEach((element) {
+                                                        if (_currentDate == null) {
+                                                          setState(() {
+                                                            _currentDate = date;
+                                                          });
+                                                        }
+                                                        else {
+                                                          if (_currentDate.isBefore(date)) {
+                                                            setState(() {
+                                                              _currentDate = date;
+                                                            });
+                                                          }
+                                                        }
+                                                      });
+                                                    }
+                                                  });
+
+                                                });
+                                                Navigator.pop(context, 'Ok');
+                                              }),
+                                              child: const Text('Ok'),
+                                            ),
+                                            TextButton(
+                                              onPressed: (){
+                                                Navigator.pop(context, 'Cancel');
+                                              },
+                                              child: const Text('Cancel'),
+                                            ),
+                                          ],
+                                        );
+                                      });
+
+                                    },);
+                                },
+                                color: Colors.white,
+                                icon: (filterTypeAllView) ? Icon(Icons.filter_alt, size: 16,) : Icon(Icons.filter_alt_outlined, size: 16,),
+                              ),
+                            )
+
+                          ],
+                        ),
+                      ),
+                    ]
+                )
+            ),
+          ],
+        )
+    );
+  }
+
+  Widget buildDiaryHeader(IconData iconData, String tag, Color? color) {
+    return Container(
+      margin: EdgeInsets.only(left : 10, bottom: 5),
+      child:
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            alignment: Alignment.centerLeft,
+            padding: EdgeInsets.only(left: 5, right: 5),
+
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Icon(iconData, size: 18, color: color,),
+                Text(tag,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      color: color,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15),),
+
+              ],
+            ),
+          ),
+        ],
+      ),
+
+    );
+  }
+
+  bool IsSomethingShow(DateTime date){
+    bool ret = false;
+
+    if(_listDiaryContent[date] != null){
+      if(filterTypeView['근무현황'] != null && filterTypeView['근무현황']!){
+        _listDiaryContent[date]!.mapBranchUserTime.keys.forEach((element) {
+          ret = true;
+        });
+      }
+
+      if(filterTypeView['지출현황'] != null && filterTypeView['지출현황']!) {
+        _listDiaryContent[date]!.mapBranchUserExpense.keys.forEach((element) {
+          if(element.length > 0){
+            ret = true;
+          }
+        });
+      }
+
+      if(filterTypeView['체크리스트'] != null && filterTypeView['체크리스트']!) {
+        _listDiaryContent[date]!.mapBranchCheckListDone.keys.forEach((element) {
+          ret = true;
+        });
+      }
+
+      if(filterTypeView['업무일지'] != null && filterTypeView['업무일지']!) {
+        _listDiaryContent[date]!.mapBranchUserDiary.keys.forEach((element) {
+          ret = true;
+        });
+      }
+    }
+    return ret;
+  }
+  Widget buildDiaryContent(DateTime date) {
+    if (_listDiaryContent[date] != null) {
+      return Container(
+          key: globalKeys[date],
+          child: (!IsSomethingShow(date)) ? Container() : Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: Colors.black38
+                ),
+                height: 30,
+                padding: EdgeInsets.fromLTRB(10, 0, 0, 0),
+                margin: EdgeInsets.only(bottom: 10),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Text('  ' +
+                        DateFormat('yyyy-MM-dd').format(date) +
+                        ' ',
+                      style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold)
+                      ,),
+                    Text(DateFormat('E', 'ko_KR').format(date),
+                      style: TextStyle(
+                          color: DateFormat('E', 'ko_KR')
+                              .format(date) == '토' ||
+                              DateFormat('E', 'ko_KR').format(
+                                  date) == '일' ? Colors
+                              .redAccent[100] : Colors.white70,
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold
+                      )
+                      ,),
+                  ],
+                ),
+              ),
+              if(filterTypeView['체크리스트']! &&  _listDiaryContent[date]!.mapBranchCheckListDone != null &&
+                  (_listDiaryContent[date]!.mapBranchCheckListDone.length > 0) && _listDiaryContent[date]!.mapBranchCheckListDone[widget.branch] != null && _listDiaryContent[date]!.mapBranchCheckListDone[widget.branch]!.length > 0)
+                Column(
+                  children: [
+                    buildDiaryHeader(
+                        Icons.check, ' 체크리스트', Colors.white70),
+                    Container(
+                      child: ListView.builder(
+                          shrinkWrap: true,
+                          padding: EdgeInsets.fromLTRB(5, 0, 0, 5),
+                          physics: const ClampingScrollPhysics(),
+                          itemCount: _listDiaryContent[date]!.mapBranchCheckListDone[widget.branch]!.keys.length,
+                          itemBuilder:(BuildContext context, int index){
+                            String checkName = _listDiaryContent[date]!.mapBranchCheckListDone[widget.branch]!.keys.toList().elementAt(index);
+                            bool checked = _listDiaryContent[date]!.mapBranchCheckListDone[widget.branch]![checkName]! != 'false';
+                            String checkedBy = '';
+                            if(checked){
+                              checkedBy = _listDiaryContent[date]!.mapBranchCheckListDone[widget.branch]![checkName]!;
+                            }
+                            if(checkedBy == 'true'){
+                              checkedBy = '';
+                            }
+
+
+                            return Container(
+                              padding: EdgeInsets.fromLTRB(15, 0, 0, 3),
+                              child:   Text((checked?'[v] ':'[ ] ') + checkName + ((checked && checkedBy.length > 0)? (' [' + checkedBy + ']') : ''),style: TextStyle( color: checked?Colors.green[200]:Colors.white30),),
+                            );
+                          }
+                      ),
+                    ),
+                    SizedBox(height: 10,)
+                  ],
+                ),
+              if(filterTypeView['근무현황']! &&  _listDiaryContent[date]!.mapBranchUserTime != null &&
+                  _listDiaryContent[date]!.mapBranchUserTime.length > 0  && _listDiaryContent[date]!.mapBranchUserTime[widget.branch] != null && _listDiaryContent[date]!.mapBranchUserTime[widget.branch]!.length > 0)
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    buildDiaryHeader(
+                        Icons.access_time, ' 근무현황', Colors.teal[200]),
+                    Container(
+                      child: ListView.builder(
+                          shrinkWrap: true,
+                          padding: EdgeInsets.fromLTRB(5, 0, 0, 5),
+                          physics: const ClampingScrollPhysics(),
+                          itemCount: _listDiaryContent[date]!.mapBranchUserTime[widget.branch]!.keys.length,
+                          itemBuilder:(BuildContext context, int index){
+                            String user = _listDiaryContent[date]!.mapBranchUserTime[widget.branch]!.keys.toList().elementAt(index);
+                            String timeStr = _listDiaryContent[date]!.mapBranchUserTime[widget.branch]![user]!;
+
+                            return Container(
+                              padding: EdgeInsets.fromLTRB(15, 0, 0, 3),
+                              child:   Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    alignment: Alignment.centerLeft,
+                                    width: 90,
+                                    child: Text(user,style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white70),),
+                                  ),
+                                  Container(
+                                    alignment: Alignment.centerLeft,
+                                    width: 100,
+                                    child: Text(timeStr.split('/')[0], style: TextStyle(color: Colors.white70)),
+                                  ),
+                                  Container(
+                                    alignment: Alignment.centerLeft,
+                                    child: Text(timeStr.split('/')[1], style: TextStyle(color: Colors.white70)),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }
+                      ),
+                    ),
+                    SizedBox(height: 10,)
+                  ],
+                ),
+              if(filterTypeView['지출현황']! && _listDiaryContent[date]!.mapBranchUserExpense != null &&
+                  _listDiaryContent[date]!.mapBranchUserExpense.length > 0  && _listDiaryContent[date]!.mapBranchUserExpense[widget.branch] != null && _listDiaryContent[date]!.mapBranchUserExpense[widget.branch]!.length > 0)
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    buildDiaryHeader(Icons.attach_money, ' 지출현황', Colors.yellow[200]),
+                    Container(
+                      child:  ListView.builder(
+                          shrinkWrap: true,
+                          padding: EdgeInsets.fromLTRB(5, 0, 0, 5),
+                          physics: const ClampingScrollPhysics(),
+                          itemCount: _listDiaryContent[date]!.mapBranchUserExpense[widget.branch]!.length,
+                          itemBuilder:(BuildContext context, int index){
+                            String user = _listDiaryContent[date]!.mapBranchUserExpense[widget.branch]!.keys.toList().elementAt(index);
+                            List<ExpenseItem> listExpense = _listDiaryContent[date]!.mapBranchUserExpense[widget.branch]![user]!;
+                            return ListView.builder(
+                              padding: EdgeInsets.fromLTRB(0, 0, 0, 3),
+                              shrinkWrap: true,
+                              physics: const ClampingScrollPhysics(),
+                              itemCount: listExpense.length,
+                              itemBuilder: (BuildContext context, int index){
+                                ExpenseItem ex = listExpense[index];
+                                return Container(
+                                    padding: EdgeInsets.fromLTRB(15, 0, 0, 5),
+                                    child : Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Container(
+                                              alignment: Alignment.centerLeft,
+                                              width: 90,
+                                              child: Text(user,style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white70),),
+                                            ),
+                                            Container(
+                                              alignment: Alignment.centerLeft,
+                                              width: 90,
+                                              child: Text(ex.type??'기타',style: TextStyle(color: Colors.white70),),
+                                            ),
+                                            Container(
+                                              padding: EdgeInsets.only(right: 10),
+                                              alignment: Alignment.centerLeft,
+                                              child: Text((ex.money??'0') + '원', style: TextStyle(color: Colors.white70)),
+                                            ),
+
+                                          ],
+                                        ),
+                                        if(ex.detail != null) Container(
+                                            child: Text(ex.detail!, style: TextStyle(color: Colors.white54, fontSize: 13))
+                                        )
+                                      ],
+                                    )
+                                );
+                              },
+                            );
+                          }
+                      ),
+                    ),
+                  ],
+                ),
+              if(filterTypeView['업무일지']! &&  _listDiaryContent[date]!.mapBranchUserDiary != null &&
+                  _listDiaryContent[date]!.mapBranchUserDiary.length > 0  && _listDiaryContent[date]!.mapBranchUserDiary[widget.branch] != null && _listDiaryContent[date]!.mapBranchUserDiary[widget.branch]!.length > 0)
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    buildDiaryHeader(
+                        Icons.event_note, ' 업무일지', Colors.blueAccent[100]),
+                    Container(
+                      child: ListView.builder(
+                          shrinkWrap: true,
+                          padding: EdgeInsets.fromLTRB(5, 0, 0, 5),
+                          physics: const ClampingScrollPhysics(),
+                          itemCount: _listDiaryContent[date]!.mapBranchUserDiary[widget.branch]!.keys.length,
+                          itemBuilder:(BuildContext context, int index){
+                            String user = _listDiaryContent[date]!.mapBranchUserDiary[widget.branch]!.keys.toList().elementAt(index);
+                            String diaryText = _listDiaryContent[date]!.mapBranchUserDiary[widget.branch]![user]!;
+
+                            return Container(
+                              padding: EdgeInsets.fromLTRB(15, 0, 0, 3),
+                              child:   Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    alignment: Alignment.centerLeft,
+                                    child: Text(user,style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white70),),
+                                  ),
+                                  Container(
+                                    alignment: Alignment.centerLeft,
+                                    child: Text(diaryText, style: TextStyle(color: Colors.white70)),
+                                  ),
+                                  SizedBox(height: 5,)
+                                ],
+                              ),
+                            );
+                          }
+                      ),
+                    )
+                  ],
+                ),
+                SizedBox(height: 5,)
+            ],
+          )
+      );
+    }
+    else {
+      return Container();
+    }
+  }
+
+
+  String getMonthPrint(bool prev){
+    DateTime latestMon = DateTime(DateTime.now().year, DateTime.now().month);
+    DateTime previousMon;
+    String latestMonPrint = latestMon.month.toString() + '월';
+    String prevMonPrint = '';
+
+    if(prev){
+      if(DateTime.now().month == 1){
+        previousMon = DateTime(DateTime.now().year - 1, 12);
+        prevMonPrint = previousMon.year.toString() + "년 " + previousMon.month.toString() + '월';
+      }
+      else{
+        previousMon = DateTime(DateTime.now().year, DateTime.now().month - 1);
+        prevMonPrint = previousMon.month.toString() + '월';
+      }
+      return prevMonPrint;
+    }
+    else{
+      return latestMonPrint;
     }
   }
 }
@@ -1684,9 +3165,17 @@ class workerData{
   late String company;
   late String workPlace;
   late Map<DateTime, double> durationMap = {};
+  late Map<DateTime, double> weekDurationMap = {};
+  late Map<DateTime, String> startMap = {};
+  late Map<DateTime, String> endMap = {};
+  late Map<DateTime, String> textMap = {};
   late Map<DateTime, List<ExpenseItem>?> expenseListMap = {};
   late List<double> latestPayMonth = [0,0];
   late List<double> totalDuration = [0,0];
+  late QuerySnapshot? workerDbQuerySnapshot;
+  late QuerySnapshot? workerExpQuerySnapshot;
+  int dateCnt = 0;
+  int expDateCnt = 0;
   final void Function(workerData)? onComplete;
   final void Function(workerData, DateTime, List<ExpenseItem>)? onExpenseReadComplete;
 
@@ -1695,46 +3184,95 @@ class workerData{
   }
 
   Future<void> getWorkInfo() async{
-    DateTime latestMon = DateTime(DateTime.now().year, DateTime.now().month);
+    DateTime latestMon = DateTime(DateTime.now().year, DateTime.now().month, );
     DateTime previousMon;
+
     if(DateTime.now().month == 1){
+
       previousMon = DateTime(DateTime.now().year - 1, 12);
     }
     else{
       previousMon = DateTime(DateTime.now().year, DateTime.now().month - 1);
     }
     //QuerySnapshot querySnapshot = await UserDatabase.getItemCollection(companyId: company, userUid: getUserId()).get();
-    UserDatabase.getItemCollection(companyId: company, userUid: getUserId()).get().then((QuerySnapshot querySnapshot) {
+    UserDatabase.getItemCollection(companyId: company, userUid: getUserId()).get().then((QuerySnapshot querySnapshot) async{
+      workerDbQuerySnapshot = querySnapshot;
       for(int i = 0; i < querySnapshot.docs.length; i++){
         var doc = querySnapshot.docs[i];
-        var dateInfo = doc.data()! as Map<String,dynamic>;
-        if(doc.id == DateFormat('yyyy-MM-dd').format(latestMon)){
-          if(dateInfo['total'] != null){
-            totalDuration[0] = double.parse(dateInfo['total']??'0');
-            latestPayMonth[0] = (totalDuration[0] * payHour);
-          }
-        }
-
-        else if(doc.id == DateFormat('yyyy-MM-dd').format(previousMon)){
-          if(dateInfo['total'] != null){
-            totalDuration[1] = double.parse(dateInfo['total']??'0');
-            latestPayMonth[1] = (totalDuration[1] * payHour);
-          }
-        }
-
         DateTime date = DateFormat('yyyy-MM-dd').parse(doc.id);
-        double duration = double.parse(dateInfo['duration']??'0');
+        if(date != null){
 
-        if(duration > 0){
-          durationMap[date] = duration;
+          if(date.isBefore(DateTime.now().subtract(Duration(days:365)))){
+            //print('Data deleted! user : ${getUserId()} , date : $date');
+            UserDatabase.deleteDoc(companyId: company, userUid: getUserId(), date: doc.id).then((value) => print('Data deleted! user : ${getUserId()} , date : $date'));
+          }
+          else{
+            dateCnt++;
+            var dateInfo = doc.data()! as Map<String,dynamic>;
+            if(doc.id == DateFormat('yyyy-MM-dd').format(latestMon)){
+              if(dateInfo['total'] != null){
+                totalDuration[0] = double.parse(dateInfo['total']??'0');
+                latestPayMonth[0] = (totalDuration[0] * payHour);
+              }
+            }
+
+            else if(doc.id == DateFormat('yyyy-MM-dd').format(previousMon)){
+              if(dateInfo['total'] != null){
+                totalDuration[1] = double.parse(dateInfo['total']??'0');
+                latestPayMonth[1] = (totalDuration[1] * payHour);
+              }
+            }
+
+            startMap[date] = dateInfo['start']??'';
+            endMap[date] = dateInfo['end']??'';
+            textMap[date] = dateInfo['text']??'';
+            double duration = double.parse(dateInfo['duration']??'0');
+
+            if(duration > 0){
+              durationMap[date] = duration;
+              int sunleft = 7 - date.weekday;
+              DateTime sunday = date.add(Duration(days: sunleft));
+              if(weekDurationMap[sunday] == null){
+                weekDurationMap[sunday] = 0;
+              }
+              weekDurationMap[sunday] = weekDurationMap[sunday]! + duration;
+            }
+
+
+            getListExpenseUser(date).then((value) {
+              expDateCnt++;
+              expenseListMap[date] = value;
+              onExpenseReadComplete!(this, date, value);
+
+              if(expDateCnt == dateCnt){
+                onComplete!(this);
+              }
+            });
+          }
         }
-
-        getListExpenseUser(date).then((value) {
-          expenseListMap[date] = value;
-          onExpenseReadComplete!(this, date, value);
-        });
       }
-      onComplete!(this);
+
+      Map<int, double> weekendPay = {};
+      weekDurationMap.forEach((key2, value2) {
+        if(value2 >= 15){
+          if((latestMon.month == key2.month) || (previousMon.month == key2.month)){
+            if(weekendPay[key2.month] == null){
+              weekendPay[key2.month] = 0;
+            }
+            var thisweekPay = value2 * 8 / 40 * payHour;
+            weekendPay[key2.month] = weekendPay[key2.month]! + thisweekPay;
+          }
+        }
+      });
+
+      weekendPay.forEach((mon, pay) {
+        if(latestMon.month == mon){
+          latestPayMonth[0] += pay;
+        }
+        else{
+          latestPayMonth[1] += pay;
+        }
+      });
     });
   }
 
@@ -1785,13 +3323,10 @@ class workerData{
         + "\n" + prevMonPrint + ' 근무 : ' + (totalDuration[1].toString()) + "시간 , " +  "급여 : " + NumberFormat.currency(locale: "ko_KR", symbol: "￦").format(latestPayMonth[1]);
   }
 
+
   void updatePay(double newPay){
     payHour = newPay;
     latestPayMonth[0] = (totalDuration[0] * payHour);
     latestPayMonth[1] = (totalDuration[1] * payHour);
   }
-
-
-
-
 }

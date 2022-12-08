@@ -1,14 +1,18 @@
 import 'dart:async';
+import 'dart:ui';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:webviewx/webviewx.dart';
+import 'package:work_inout/helpScreen.dart';
 import 'package:work_inout/signupScreen.dart';
 import 'branch_database.dart';
 import 'firebase_options.dart';
 import 'administratorScreen.dart';
+import 'myAdKakaoFit.dart';
 import 'user_database.dart';
 import 'userScreen.dart';
 import 'package:app_links/app_links.dart';
@@ -26,10 +30,13 @@ void main() async {
 
     Map<String, Widget Function(BuildContext)> RoutingPages = {};
     RoutingPages['/'] = (context) => CompanyLoginPage();
+    RoutingPages['/help'] = (context) => HelpScreen();
     //RoutingPages['/'] = (context) => accountPage();
     //html.window.open(Uri.base.toString() + 'adview.html',"Attendi");
 
     runApp(MaterialApp(
+      scrollBehavior: MyCustomScrollBehavior(),
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
         // This is the theme of your application.
         //
@@ -47,25 +54,17 @@ void main() async {
       ),
       darkTheme: ThemeData.dark(),
       themeMode: ThemeMode.system,
-      initialRoute: '/',
       onUnknownRoute: (settings) {
-        String companyId = (settings.name??'').replaceFirst('/', '');
+        String companyId = (settings.name??'').replaceFirst('/', '').toLowerCase();
         if(companyId.isNotEmpty){
-          SharedPreferences.getInstance().then((prefs) {
-            prefs.setString('companycode', companyId);
-          });
-
           return MaterialPageRoute(
               settings: RouteSettings(name: '/'+ companyId),
               builder: (context) => UserLoginPage(companyId: companyId, title: 'Attendi'));
         }
       },
       onGenerateRoute: (settings) {
-        String companyId = (settings.name??'').replaceFirst('/', '');
+        String companyId = (settings.name??'').replaceFirst('/', '').toLowerCase();
         if(companyId.isNotEmpty){
-          SharedPreferences.getInstance().then((prefs) {
-            prefs.setString('companycode', companyId);
-          });
 
           return MaterialPageRoute(
               settings: RouteSettings(name: '/'+ companyId),
@@ -77,6 +76,7 @@ void main() async {
   }
   else{
     runApp(MaterialApp(
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
         // This is the theme of your application.
         //
@@ -96,10 +96,16 @@ void main() async {
       themeMode: ThemeMode.system,
       home: CompanyLoginPage(),
     ));
-
-
   }
-
+}
+class MyCustomScrollBehavior extends MaterialScrollBehavior {
+  // Override behavior methods and getters like dragDevices
+  @override
+  Set<PointerDeviceKind> get dragDevices => {
+    PointerDeviceKind.touch,
+    PointerDeviceKind.mouse,
+    // etc.
+  };
 }
 
 class CompanyLoginPage extends StatefulWidget {
@@ -129,17 +135,26 @@ class _CompanyLoginPageState extends State<CompanyLoginPage> {
   void initState(){
     fToast.init(context);
     initDeepLinks();
-    SharedPreferences.getInstance().then((prefs) {
-      final String? value = prefs.getString('companycode');
-      if(value != null && value.length > 0){
-        Navigator.push(
-            context,
-            MaterialPageRoute(
-                settings: RouteSettings(name: '/'+ value),
-                builder: (context) => UserLoginPage(companyId: value, title: 'Attendi'))
-        );
-      }
-    });
+    print('url : ' + Uri.base.toString());
+    if(!kIsWeb){
+      SharedPreferences.getInstance().then((prefs) {
+        String? value = prefs.getString('companycode');
+        if(value != null && value.length > 0){
+          value = value.toLowerCase();
+          getAdminPassword(value).then((password){
+            if(password.length > 0){
+              Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      settings: RouteSettings(name: '/'+ value!),
+                      builder: (context) => UserLoginPage(companyId: value!, title: 'Attendi'))
+              );
+            }
+          });
+        }
+      });
+    }
+
   }
 
   Future<void> initDeepLinks() async {
@@ -167,182 +182,106 @@ class _CompanyLoginPageState extends State<CompanyLoginPage> {
   Widget build(BuildContext context) {
     return Scaffold(
         backgroundColor: Color(0xFF333A47),
-        appBar: AppBar(
-          backgroundColor: Color(0xFF333A47),
-          title: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text('A',style: TextStyle(fontSize: 30, color: Colors.teal[200], fontWeight: FontWeight.bold),),
-              Padding(padding: EdgeInsets.fromLTRB(0, 0, 0, 2),
-                child: Text('ttendi', style: TextStyle(fontSize: 20, color: Colors.teal[200],),),)
-            ],
-          ),
-          automaticallyImplyLeading: false,
-        ),
         body: Padding(
             padding: EdgeInsets.all(10),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.start,
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: ListView(
               children: <Widget>[
-                SizedBox(height: 20,),
+                SizedBox(height: 30,),
+                Container(
+                  padding: EdgeInsets.all(10),
+                  child:  Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text('A',style: TextStyle(fontSize: 70, color: Colors.redAccent[100], fontWeight: FontWeight.bold),),
+                      Padding(padding: EdgeInsets.fromLTRB(0, 0, 0, 2),
+                        child: Text('ttendi', style: TextStyle(fontSize: 50, color: Colors.teal[200],),),)
+                    ],
+                  ),
+                ),
+                SizedBox(height: 10,),
                 Text(
-                  "사장님께서 공유한 Company Code를 등록하세요!",
+                  "     회사 전용 Company Code를 입력하세요!",
                   style: TextStyle(color: Colors.teal[200], ),
                   textAlign: TextAlign.left,
                 ),
-                SizedBox(height: 20,),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Expanded(
-                      child: TextFormField(
-                        style: TextStyle(color: Colors.white70, ),
-                        controller: nameController,
-                        decoration: InputDecoration(
-                          border: OutlineInputBorder(borderSide: BorderSide(color: Colors.teal)),
-                          enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.teal)),
-                          labelText: 'Company Code',
-                          labelStyle: TextStyle(color: Colors.teal[200], ),
+                SizedBox(height: 10,),
+                Container(
+                  padding: EdgeInsets.all(10),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Expanded(
+                        child: TextFormField(
+                          style: TextStyle(color: Colors.white70, fontSize: 20),
+                          controller: nameController,
+                          decoration: InputDecoration(
+                            fillColor: Colors.transparent,
+                            filled: true,
+                            labelStyle: TextStyle(color: Colors.redAccent[100],),
+                            labelText: 'Company Code',
+                            enabledBorder: OutlineInputBorder(
+                              borderSide: BorderSide(
+                                  color: Colors.teal[200]!),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderSide: BorderSide(
+                                  color: Colors.teal[200]!),
+                            ),
+                            suffixIcon: IconButton(
+                                alignment: Alignment.center,
+                                onPressed: () async{
+                                  try{
+                                    String codeInput = nameController.text.toLowerCase();
+                                    getAdminPassword(codeInput).then((value){
+                                      if(value.length > 0){
+                                        Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                                settings: RouteSettings(name: '/'+ codeInput),
+                                                builder: (context) => UserLoginPage(companyId: codeInput, title: 'Attendi'))
+                                        );
+                                      }
+                                      else{
+                                        Fluttertoast.showToast(msg: '가입되지 않은 Company Code 입니다.', timeInSecForIosWeb: 5);
+                                      }
+                                    });
+                                  }
+                                  catch(e){
+                                    print(e);
+                                  }
+                                },
+                                icon: Icon(Icons.arrow_forward, color: Colors.redAccent[100],size: 25,)
+                            ),
+                          ),
                         ),
                       ),
-                    ),
-                    IconButton(
-                        onPressed: () async{
-                          try{
-                            getAdminPassword(nameController.text).then((value){
-                              if(value.length > 0){
-                                SharedPreferences.getInstance().then((prefs) {
-                                  prefs.setString('companycode', nameController.text);
-                                  Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                          settings: RouteSettings(name: '/'+ nameController.text),
-                                          builder: (context) => UserLoginPage(companyId: nameController.text, title: 'Attendi'))
-                                  );
-                                });
-                              }
-                              else{
-                                Fluttertoast.showToast(msg: '가입되지 않은 Company Code 입니다.', timeInSecForIosWeb: 5);
-                              }
-                            });
-                          }
-                          catch(e){
-                            print(e);
-                          }
-                        },
-                        icon: Icon(Icons.arrow_forward, color: Colors.teal[200],)
-                    )
-                  ],
+
+                    ],
+                  ),
                 ),
                 Container(
-                  alignment: Alignment.bottomLeft,
+                  padding: EdgeInsets.only(top: 10),
+                  alignment: Alignment.center,
                   child: TextButton(
-                    child: Text('회원가입', style: TextStyle(color: Colors.teal[200])),
+                    child: Text('신규 Company Code 생성', style: TextStyle(color: Colors.blueAccent[100])),
                     onPressed: (){
-                      showDialog(
-                          context: context,
-                          builder: (context) {
-                            Fluttertoast.showToast(msg: '준비중입니다..', timeInSecForIosWeb: 5);
-                            return AlertDialog();
-                            return AlertDialog(
-                              title: const Text('회원 가입'),
-                              content: SizedBox(
-                                height: 150,
-                                child: Column(
-                                  children: [
-                                    Container(
-                                      margin : const EdgeInsets.all(5),
-                                      height: 40,
-                                      child: TextField(
-                                          controller: nameController,
-                                          decoration: const InputDecoration(
-                                            border:  OutlineInputBorder(),
-                                            labelText: 'Company Id',
-                                          ),
-                                          onChanged: (value) => setState(() {
-                                            _companyName = value;
-                                          })
-                                      ),
-                                    ),
-                                    Container(
-                                      margin : const EdgeInsets.all(5),
-                                      height: 40,
-                                      child: TextField(
-                                          obscureText: true,
-                                          decoration: const InputDecoration(
-                                            border: OutlineInputBorder(),
-                                            labelText: 'Password',
-                                          ),
-                                          onChanged: (value) => setState(() {
-                                            _adminPasswordInput = value;
-                                          })
-                                      ),
-                                    ),
-                                    Container(
-                                      margin : const EdgeInsets.all(5),
-                                      height: 40,
-                                      child: TextField(
-                                          obscureText: true,
-                                          decoration: const InputDecoration(
-                                            border: OutlineInputBorder(),
-                                            labelText: 'Password Confirm',
-                                          ),
-                                          onChanged: (value) => setState(() {
-                                            _adminPasswordInputCnf = value;
-                                          })
-                                      ),
-                                    ),
+                      Navigator.push(context, MaterialPageRoute(builder: (context) => SignupPage()));
 
-                                  ],
-                                ),
-                              ),
-                              actions: <Widget>[
-                                TextButton(
-                                  child: Text('Sign up'),
-                                  onPressed: () async {
-                                    bool companyExist = false;
-                                    try{
-                                      await BranchDatabase.getCompanyListCollection().get().then((QuerySnapshot querySnapshot){
-                                        querySnapshot.docs.forEach((doc) {
-                                          //CompanyList[doc.id]
-                                          if(doc.id == _companyName){
-                                            companyExist = true;
-                                          }
-                                        });
-                                        if(_adminPasswordInput.length > 0 && _adminPasswordInput.length > 0){
-                                          if(_adminPasswordInput == _adminPasswordInputCnf){
-                                            if(companyExist == false && _companyName != 'list'){
-                                              UserDatabase.addAdminUserItem(companyId: _companyName, userUid: 'Administrator', key: 'password', value: _adminPasswordInput).then((value){
-                                                BranchDatabase.addCompanyListItem(companyId: _companyName, key: 'name', value: _companyName);
-                                              });
-                                              Navigator.pop(context);
-                                            }
-                                            else{
-                                              _showToast('Company Id already exists!');
-                                            }
-                                          }
-                                          else{
-                                            _showToast('Passwords do not match!');
-                                          }
-                                        }
-                                      });
-                                    }
-                                    catch(e){
-                                      print(e);
-                                    }
-                                  },
-                                ),
-                              ],
-                            );
-                          });
                     },
                   ),
                 ),
               ],
             )
-        )
+        ),
+        floatingActionButton: FloatingActionButton(
+          child: Icon(Icons.question_mark),
+          backgroundColor: Colors.teal[200],
+          onPressed: (){
+            Navigator.push(context, MaterialPageRoute(  settings: RouteSettings(name: '/'+ 'help'),builder: (context) => HelpScreen()));
+          },
+        ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
   }
 

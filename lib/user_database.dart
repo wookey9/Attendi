@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'branch_database.dart';
 
@@ -213,6 +215,47 @@ class UserDatabase {
       });
     });
     return passWord;
+  }
+
+  static Future<String> getAdminEmailDb(String companyId) async{
+    String email = '';
+    await UserDatabase.getItemCollection(companyId: companyId, userUid: 'Administrator').get().then((QuerySnapshot querySnapshot) {
+      bool adminExist = false;
+      querySnapshot.docs.forEach((doc) {
+        if(doc.id == 'Administrator'){
+          adminExist = true;
+          try{
+            email = doc['email'];
+          }
+          catch (e){
+            print(e);
+          }
+        }
+      });
+    });
+    return email;
+  }
+
+  static Future<int> getMinuteIntervalDb(String companyId) async{
+    int minuteInterval = 30;
+    await UserDatabase.getItemCollection(companyId: companyId, userUid: 'Administrator').get().then((QuerySnapshot querySnapshot) {
+      bool adminExist = false;
+      querySnapshot.docs.forEach((doc) {
+        if(doc.id == 'Administrator'){
+          adminExist = true;
+          try{
+            var minInter = int.parse(doc['minute_interval']);
+            if(minInter != null){
+              minuteInterval = minInter;
+            }
+          }
+          catch (e){
+            print(e);
+          }
+        }
+      });
+    });
+    return minuteInterval;
   }
 
 }
