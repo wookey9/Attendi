@@ -1,12 +1,15 @@
+import 'dart:io';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:email_validator/email_validator.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:loading_indicator/loading_indicator.dart';
 import 'package:webviewx/webviewx.dart';
-import 'myAdKakaoFit.dart';
+import 'myAdBanner.dart';
 import 'user_database.dart';
 import 'branch_database.dart';
 import 'administratorScreen.dart';
@@ -67,6 +70,9 @@ class _UserLoginPageState extends State<UserLoginPage> {
             }
           });
           initDone = true;
+          //String os = Platform.operatingSystem; //in your code
+          print(defaultTargetPlatform);
+          //print('os : '+ os);
         });
       });
     }
@@ -300,7 +306,7 @@ class _UserLoginPageState extends State<UserLoginPage> {
                         },
                       ),
                     ),
-                    getAdKakaoFit('Attendi-web'),
+                    getAdBanner('big-size-banner'),
                   ],
                 )
             )

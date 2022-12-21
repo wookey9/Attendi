@@ -5,6 +5,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttertoast/fluttertoast.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:webviewx/webviewx.dart';
 import 'package:work_inout/helpScreen.dart';
@@ -12,11 +13,12 @@ import 'package:work_inout/signupScreen.dart';
 import 'branch_database.dart';
 import 'firebase_options.dart';
 import 'administratorScreen.dart';
-import 'myAdKakaoFit.dart';
+import 'myAdBanner.dart';
 import 'user_database.dart';
 import 'userScreen.dart';
 import 'package:app_links/app_links.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:io' show Platform;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -75,6 +77,10 @@ void main() async {
     ));
   }
   else{
+    if(defaultTargetPlatform == TargetPlatform.iOS){
+      await MobileAds.instance.initialize();
+    }
+
     runApp(MaterialApp(
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
@@ -136,6 +142,7 @@ class _CompanyLoginPageState extends State<CompanyLoginPage> {
     fToast.init(context);
     initDeepLinks();
     print('url : ' + Uri.base.toString());
+
     if(!kIsWeb){
       SharedPreferences.getInstance().then((prefs) {
         String? value = prefs.getString('companycode');
@@ -153,6 +160,12 @@ class _CompanyLoginPageState extends State<CompanyLoginPage> {
           });
         }
       });
+
+      if(defaultTargetPlatform == TargetPlatform.iOS){
+        MobileAds.instance.updateRequestConfiguration(RequestConfiguration(
+            testDeviceIds: ['A7793781E9E54FD8A830CF098828710F']
+        ));
+      }
     }
 
   }

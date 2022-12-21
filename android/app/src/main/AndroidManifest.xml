@@ -4,6 +4,9 @@
         android:label="Attendi"
         android:name="${applicationName}"
         android:icon="@mipmap/attendi">
+       <meta-data
+           android:name="com.google.android.gms.ads.APPLICATION_ID"
+           android:value="ca-app-pub-4728827454661105~4604667873"/>
         <activity
             android:name=".MainActivity"
             android:exported="true"

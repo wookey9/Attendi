@@ -23,6 +23,7 @@ import 'checklist.dart';
 import 'myDownload.dart';
 import 'package:fl_chart/fl_chart.dart';
 
+const int wideModeThres = 680;
 
 class AdminPage extends StatefulWidget{
   const AdminPage({required this.companyName, required this.adminPassword, required this.email });
@@ -312,7 +313,7 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin{
             ),
 
              */
-            bottomNavigationBar: (_selectedTabIdx == _branchList.length) ? null : BottomAppBar(
+            bottomNavigationBar: (_selectedTabIdx == _branchList.length || (MediaQuery.of(context).size.width >= wideModeThres)) ? null : BottomAppBar(
               child: Container(
                 color: Color(0xFF333A47),
                 child: TabBar(
@@ -473,7 +474,7 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin{
                        children: [
                          TextButton(
                            onPressed: () {
-                             _listNoticeEditController[_selectedTabIdx - 1].text = "";
+                             _listNoticeEditController[_selectedTabIdx].text = "";
                            },
                            child: Text('Clear', style: TextStyle(color: Colors.redAccent[100]),),
                          ),
@@ -798,12 +799,17 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin{
     for(int i = 0; i < curCheckList.length; i++){
       BranchDatabase.addCheckItem(companyId: _companyName, branch: br, checkId: i, key: 'name', value: curCheckList[i].name);
       BranchDatabase.addCheckItem(companyId: _companyName, branch: br, checkId: i, key: 'writetime', value: DateFormat('yyyy-MM-dd').format(curCheckList[i].writetime));
-      if(!copyToAll){
-        curCheckList[i].checked.forEach((key, value) {
-          BranchDatabase.addCheckItem(companyId: _companyName, branch: br, checkId: i, key: DateFormat('yyyy-MM-dd').format(key), value: value);
-        });
 
+      if(_listCheckListBranch[br] != null){
+        _listCheckListBranch[br]!.forEach((element) {
+          if(element.name == curCheckList[i].name){
+            curCheckList[i].checked.forEach((key, value) {
+              BranchDatabase.addCheckItem(companyId: _companyName, branch: br, checkId: i, key: DateFormat('yyyy-MM-dd').format(key), value: value);
+            });
+          }
+        });
       }
+
     }
 
     _listCheckListBranch[br] = curCheckList;
@@ -1672,14 +1678,64 @@ class _BranchPageState extends State<BranchPage> with AutomaticKeepAliveClientMi
 
 
   Widget build(BuildContext context) {
-    if(_bottomTabIndex == 0){
-      return getUserList();
-    }
-    else if(_bottomTabIndex == 1){
-      return buildBranchTimeline();
+    if(MediaQuery.of(context).size.width >= wideModeThres){
+      return Row(
+        children: [
+          Container(
+            width: 330,
+            child: Column(
+              children: [
+                Container(
+                  color: Colors.black38,
+                  height: 50,
+                  child:  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.people,color: Colors.white,),
+                      Text(" 직원현황", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: getUserList(),
+                )
+              ],
+            )
+          ),
+          Expanded(
+            child:   Column(
+              children: [
+                Container(
+                  color: Colors.black12,
+                  height: 50,
+                  child:  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.access_time_outlined,color: Colors.white,),
+                      Text(" 타임라인", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
+                    ],),
+                ),
+                Expanded(
+                  child: buildBranchTimeline(),
+                )
+              ],
+            ),
+          )
+
+
+        ],
+      );
     }
     else{
-      return Container();
+      if(_bottomTabIndex == 0){
+        return getUserList();
+      }
+      else if(_bottomTabIndex == 1){
+        return buildBranchTimeline();
+      }
+      else{
+        return Container();
+      }
     }
   }
 
@@ -2107,6 +2163,7 @@ class _BranchPageState extends State<BranchPage> with AutomaticKeepAliveClientMi
                           Container(
                             child: TextButton(
                               onPressed: (){
+                                Navigator.pop(context, 'Ok');
                                 showDialog<String>(
                                   context: context,
                                   builder: (BuildContext context) => AlertDialog(
@@ -2121,6 +2178,7 @@ class _BranchPageState extends State<BranchPage> with AutomaticKeepAliveClientMi
                                       ),
                                     ],
                                   ),);
+
                               },
                               child: const Text('Delete', style: TextStyle(color: Colors.redAccent)),
                             ),
@@ -2574,7 +2632,7 @@ class _BranchPageState extends State<BranchPage> with AutomaticKeepAliveClientMi
 
   Widget buildBranchTimeline(){
     return Container(
-        color: Colors.black38,
+        color: MediaQuery.of(context).size.width >= wideModeThres ? Colors.black12 : Colors.black38,
         child: Stack(
           children: [
             SingleChildScrollView(
@@ -2604,7 +2662,6 @@ class _BranchPageState extends State<BranchPage> with AutomaticKeepAliveClientMi
               ),
             ),
             Container(
-                color: Colors.black38,
                 child: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,

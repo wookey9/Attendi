@@ -1,8 +1,12 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math';
 import 'package:day_night_time_picker/lib/state/time.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webviewx/webviewx.dart';
 import 'package:work_inout/userScreen.dart';
 
@@ -24,9 +28,10 @@ import 'package:flutter_time_range/flutter_time_range.dart';
 import 'package:flutter_time_picker_spinner/flutter_time_picker_spinner.dart';
 import 'package:pattern_formatter/pattern_formatter.dart';
 
-import 'myAdKakaoFit.dart';
+import 'myAdBanner.dart';
 
 const List<String> expenseType = ['발주', '매장카드','계좌이체', '기타'];
+const int wideModeThres = 780;
 
 class TimeLinePage extends StatefulWidget{
   const TimeLinePage({Key? key, required this.companyId, required this.title,
@@ -82,6 +87,7 @@ class _TimeLineState extends State<TimeLinePage> {
   late List<ExpenseItem> _listExpense = [];
   late List<ExpenseItem> _listExpenseOrg = [];
   late int _minuteInterval = 30;
+  late bool showad = true;
 
   TextEditingController _inputController = new TextEditingController();
 
@@ -95,16 +101,17 @@ class _TimeLineState extends State<TimeLinePage> {
 
   var _fillCalendar = true;
   late double _calendarRowHeight = 85;
-  final double divHeight = 20;
+  final double divHeight = 30;
   static const _locale = 'ko';
 
   int _selectedBottomIndex = 0;
 
   var _bottomTabController;
+  late bool noticeShow = true;
 
   String _formatNumber(String s) => NumberFormat.decimalPattern(_locale).format(int.parse(s));
   String get _currency => NumberFormat.compactSimpleCurrency(locale: _locale).currencySymbol;
-
+  late InterstitialAd _interstitialAd;
 
   @override
   void initState() {
@@ -113,6 +120,44 @@ class _TimeLineState extends State<TimeLinePage> {
     _restTimeListKey = ObjectKey(_restTimeRef);
     _updateRestTimeRef(_selectedDate);
     super.initState();
+
+    if(!kIsWeb){
+      if(defaultTargetPlatform == TargetPlatform.iOS){
+        InterstitialAd.load(
+            adUnitId: FULL_UNIT_ID,
+            request: AdRequest(),
+            adLoadCallback: InterstitialAdLoadCallback(
+              onAdLoaded: (InterstitialAd ad) {
+                // Keep a reference to the ad so you can show it later.
+                _interstitialAd = ad;
+                print('InterstitialAd loaded');
+              },
+              onAdFailedToLoad: (LoadAdError error) {
+                print('InterstitialAd failed to load: $error');
+              },
+            ));
+      }
+    }
+
+    SharedPreferences.getInstance().then((prefs) {
+      final String? value = prefs.getString('noticeshow');
+      if(value != null && value.length > 0){
+        DateTime date = DateFormat('yyyy-MM-dd').parse(value);
+        //date = date.subtract(Duration(days: 6));
+        if(date != null){
+          if(date.isBefore(DateTime.now().subtract(Duration(days: 1)))){
+            setState((){
+              noticeShow = true;
+            });
+          }
+          else{
+            setState((){
+              noticeShow = false;
+            });
+          }
+        }
+      }
+    });
   }
 
   double _timeOfDayToDouble(TimeOfDay tod) => tod.hour + tod.minute / 60.0;
@@ -136,11 +181,7 @@ class _TimeLineState extends State<TimeLinePage> {
         widget.user.replaceAll('-', '').trim() + " - [" + widget.workplace +
             "]";
     
-    UserDatabase.getMinuteIntervalDb(widget.companyId).then((value) {
-      setState(() {
-        _minuteInterval = value;
-      });
-    });
+
 
     BranchDatabase.getBranchCollection(companyId: widget.companyId).get().then((
         QuerySnapshot querySnapshot) {
@@ -165,7 +206,13 @@ class _TimeLineState extends State<TimeLinePage> {
               }
             }
           });
-          getDataFromUserDoc(_userId);
+          UserDatabase.getMinuteIntervalDb(widget.companyId).then((value) {
+            setState(() {
+              _minuteInterval = value;
+            });
+            getDataFromUserDoc(_userId);
+          });
+
           BranchDatabase.getBranchCheckListCollection(companyId: widget.companyId, branch: branchName).get().then((QuerySnapshot querySnapshot2){
             for(int i = 0; i < querySnapshot2.docs.length; i++) {
               var data = querySnapshot2.docs[i].data()! as Map<String, dynamic>;
@@ -214,12 +261,37 @@ class _TimeLineState extends State<TimeLinePage> {
 
   @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-        length: 2,
+    if(isWideMode()){
+      if(!_calendarExpand){
+        setState(() {
+          _calendarExpand = true;
+          _fillCalendar = true;
+          _calendarFormat = CalendarFormat.month;
+          _calendarHeight = MediaQuery.of(context).size.height;
+        });
+      }
+    }
+    return WillPopScope(
+        onWillPop : () async{
+          if(_fillCalendar){
+            return true;
+          }
+          else{
+            setState((){
+              //_fillCalendar = true;
+              //_calendarFormat = CalendarFormat.month;
+              _calendarExpand = true;
+              _calendarHeight += 1;
+              _calendarExpandDuration = 10;
+            });
+            return false;
+          }
+
+        },
         child: Scaffold(
           backgroundColor: Color(0xFF333A47),
           appBar: AppBar(
-            automaticallyImplyLeading: _fillCalendar,
+            //automaticallyImplyLeading: _fillCalendar,
             leadingWidth: 30,
             backgroundColor: Color(0xFF333A47),
             title:
@@ -238,7 +310,6 @@ class _TimeLineState extends State<TimeLinePage> {
                   child: Text('  @' + _userId, style: TextStyle(fontSize : 12, color: Colors.white, ), maxLines: 2,),)
               ],
             ),
-
             actions: [
               if(_fillCalendar) IconButton(
                   onPressed: (){
@@ -305,336 +376,591 @@ class _TimeLineState extends State<TimeLinePage> {
  */
           body:
           //_fillCalendar ? _buildCalendar() :
-          Column(
+          isWideMode() ? Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
               _buildCalendar(),
-              if(!_fillCalendar) ...{
-                if(_calendarExpand == false)...{
-                  Expanded(
-                      child:
-                      Material(
-                        color: Color(0xFF333A47),
-                        child: SingleChildScrollView(
-                            controller: _userScrollController,
-                            child: Column(
-                              children: [
-                                getAdKakaoFit('Attendi-web-userScreen-320x100'),
-                                Divider(
-                                    color: Colors.white38,
-                                    thickness: 1,
-                                    height: 1),
-                                Padding(
-                                    padding: EdgeInsets.only(left: 10, top: 10),
-                                    child: Row(
-                                      crossAxisAlignment: CrossAxisAlignment.center,
-                                      children: [
-                                        Icon(Icons.work_history_outlined,
-                                          color: Colors.white,),
-                                        Text(' 근무 시간',
-                                          style: TextStyle(
-                                              fontSize: 17, color: Colors.white),
-                                          textAlign: TextAlign.center,),
-                                      ],
-                                    )
-                                ),
-                                Container(
-                                  padding: EdgeInsets.only(
-                                      top: 15, left: 20, right: 20),
-                                  child: Row(
-                                    mainAxisAlignment: MainAxisAlignment
-                                        .spaceAround,
-                                    children: [
-                                      TextButton(
-                                          style: ButtonStyle(
-                                            overlayColor: MaterialStateColor
-                                                .resolveWith((states) =>
-                                            Colors.white38),
-                                            backgroundColor: MaterialStateColor
-                                                .resolveWith((states) =>
-                                            _selectFromTo == "from"
-                                                ? Colors.white38
-                                                : Colors.transparent),
+              Column(
 
-                                          ),
-                                          onPressed: () {
-                                            setState(() {
-                                              if (_selectFromTo == "from") {
-                                                _selectFromTo = "";
-                                              }
-                                              else {
-                                                _selectFromTo = "from";
-                                                _timeStreamCon.add(
-                                                    convertTimeToDateTime(
-                                                        _selectedTimeFrom));
-                                              }
-                                            });
-                                          },
-                                          child: Text(_selectedTimeFrom != null
-                                              ? (_selectedTimeFrom!.format(context))
-                                              : TimeOfDay(hour: TimeOfDay
-                                              .now()
-                                              .hour, minute: (TimeOfDay
-                                              .now()
-                                              .minute / 30).floor() * 30).format(
-                                              context),
-                                            style: TextStyle(color: Colors.white,
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 20),
-                                          )
-                                      ),
-                                      Icon(Icons.arrow_forward,
-                                        color: Colors.white38,),
-                                      TextButton(
-                                          style: ButtonStyle(
-                                            overlayColor: MaterialStateColor
-                                                .resolveWith((states) =>
-                                            Colors.white38),
-                                            backgroundColor: MaterialStateColor
-                                                .resolveWith((states) =>
-                                            _selectFromTo == "to"
-                                                ? Colors.white38
-                                                : Colors.transparent),
-                                          ),
-                                          onPressed: () {
-                                            setState(() {
-                                              if (_selectFromTo == "to") {
-                                                _selectFromTo = "";
-                                              }
-                                              else {
-                                                _selectFromTo = "to";
-                                                _timeStreamCon.add(
-                                                    convertTimeToDateTime(
-                                                        _selectedTimeTo));
-                                              }
-                                            });
-                                          },
-                                          child: Text(_selectedTimeTo != null
-                                              ? (_selectedTimeTo!.format(context))
-                                              : TimeOfDay(hour: TimeOfDay
-                                              .now()
-                                              .hour, minute: (TimeOfDay
-                                              .now()
-                                              .minute / 30).floor() * 30).format(
-                                              context),
-                                            style: TextStyle(color: Colors.white,
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 20),
-                                          )
-                                      ),
-                                    ],
-                                  ),
-                                ),
-
-                                Divider(color: Colors.white38,
-                                    thickness: 1,
-                                    height: divHeight),
-                                AnimatedContainer(
-                                  height: _selectFromTo == "from" ? 150 : 0,
-                                  duration: Duration(milliseconds: 300),
-                                  onEnd: () {
-                                    _updateSelectedRestHour();
-                                  },
-                                  child: Container(
-                                    height: 150,
-                                    child: (_selectFromTo == "from") ? getTimeSlider(_selectedTimeFrom) : Container(),
-                                  ),
-                                ),
-                                AnimatedContainer(
-                                  height: _selectFromTo == "to" ? 150 : 0,
-                                  duration: Duration(milliseconds: 300),
-                                  onEnd: () {
-                                    _updateSelectedRestHour();
-                                  },
-                                  child: Container(
-                                    height: 150,
-                                    child: (_selectFromTo == "to") ? getTimeSlider(_selectedTimeTo) : Container(),
-                                  ),
-                                ),
-                                if(_selectFromTo != "") Divider(
-                                    color: Colors.white38,
-                                    thickness: 1,
-                                    height: divHeight),
-                                Padding(
-                                    padding: EdgeInsets.only(
-                                        left: 10, top: 0, bottom: 10),
-                                    child: Row(
-                                      crossAxisAlignment: CrossAxisAlignment.center,
-                                      children: [
-                                        Icon(Icons.forest, color: Colors.white,
-                                          size: 22,),
-                                        Text(' 휴식 시간',
-                                          style: TextStyle(
-                                            fontSize: 17, color: Colors.white,),
-                                          textAlign: TextAlign.center,),
-                                      ],
-                                    )
-                                ),
-                                SizedBox(height: 4),
-                                SizedBox(
-                                  height: 45,
-                                  child: ListView.builder(
-                                    key: _restTimeListKey,
-                                    controller: _scrollController,
-                                    scrollDirection: Axis.horizontal,
-                                    padding: EdgeInsets.only(left: 20),
-                                    itemCount: _restTimeRef.length,
-                                    itemExtent: 90,
-                                    itemBuilder: (BuildContext context, int index) {
-                                      return Padding(
-                                        padding: const EdgeInsets.only(right: 8.0),
-                                        child: TimeButton(
-                                            borderColor: Colors.white38,
-                                            activeBorderColor: Colors.white,
-                                            backgroundColor: Color(0xFF333A47),
-                                            activeBackgroundColor: Color(
-                                                0xFF333A47),
-                                            textStyle: TextStyle(
-                                                fontWeight: FontWeight.normal,
-                                                color: Colors.white38),
-                                            activeTextStyle: TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                                color: Colors.white),
-                                            time: _restTimeRef[index].toString() +
-                                                ' 시간',
-                                            value: _selectedRestHour ==
-                                                _restTimeRef[index],
-                                            onSelect: (_) =>
-                                                setState(() {
-                                                  _selectRestHour(
-                                                      index, _restTimeRef[index]);
-                                                  //_getDurationTime(_selectedDate);
-                                                })
-                                        ),
-                                      );
-                                    },
-
-                                  ),
-                                ),
-                                SizedBox(height: 4,),
-                                Divider(color: Colors.white38,
-                                    thickness: 1,
-                                    height: divHeight),
-                                Padding(
-                                    padding: EdgeInsets.only(
-                                        left: 10, top: 0, bottom: 10),
-                                    child: Row(
-                                      crossAxisAlignment: CrossAxisAlignment.center,
-                                      children: [
-                                        Container(
-                                          padding: EdgeInsets.only(top: 4),
-                                          child: Icon(Icons.attach_money,
-                                            color: Colors.white, size: 25,),
-                                        ),
-                                        Text(' 지출 내역',
-                                          style: TextStyle(
-                                              fontSize: 17, color: Colors.white),
-                                          textAlign: TextAlign.center,),
-                                      ],
-                                    )
-                                ),
-                                _buildExpenseList(),
-                                SizedBox(height: 4),
-                                Divider(color: Colors.white38,
-                                    thickness: 1,
-                                    height: divHeight),
-                                _buildChecklist(),
-                                if(curChecked.length > 0) SizedBox(height: 4),
-                                if(curChecked.length > 0) Divider(color: Colors.white38,
-                                    thickness: 1,
-                                    height: divHeight),
-                                Padding(
-                                    padding: EdgeInsets.only(
-                                        left: 10, top: 0, bottom: 10),
-                                    child: Row(
-                                      crossAxisAlignment: CrossAxisAlignment.center,
-                                      children: [
-                                        Container(
-                                          padding: EdgeInsets.only(top: 4),
-                                          child: Icon(Icons.note_alt_outlined,
-                                            color: Colors.white, size: 25,),
-                                        ),
-                                        Text(' 업무 일지',
-                                          style: TextStyle(
-                                              fontSize: 17, color: Colors.white),
-                                          textAlign: TextAlign.center,),
-                                      ],
-                                    )
-                                ),
-                                Container(
-                                    margin: EdgeInsets.fromLTRB(20, 5, 20, 0),
-                                    padding: EdgeInsets.all(10),
-                                    decoration: BoxDecoration(
-                                      color: Color(0xFF333A47),
-                                      borderRadius: BorderRadius.circular(8),
-                                      border: Border.all(
-                                          color: Colors.white70
-                                      ),
-                                    ),
-                                    child: Column(
-                                      children: [
-                                        Container(
-                                          padding: EdgeInsets.fromLTRB(0, 0, 0, 10),
-                                          alignment: Alignment.centerLeft,
-                                          child: Text(
-                                            _getWorkDiaryHdr(), style: TextStyle(
-                                            fontSize: 15,
-                                            color: Colors.blueAccent[100],),),
-                                        ),
-                                        SingleChildScrollView(
-                                          scrollDirection: Axis.vertical,
-                                          child:
-                                          TextFormField(
-                                            decoration: InputDecoration(
-                                              enabledBorder: UnderlineInputBorder(
-                                                borderSide: BorderSide(
-                                                    color: Colors.white70),
-                                              ),
-                                              focusedBorder: UnderlineInputBorder(
-                                                borderSide: BorderSide(
-                                                    color: Colors.white70),
-                                              ),
-                                            ),
-                                            controller: _inputController,
-                                            keyboardType: TextInputType.multiline,
-                                            maxLines: null,
-                                            autofocus: false,
-                                            style: TextStyle(
-                                                fontSize: 15, color: Colors
-                                                .white70),
-
-                                            focusNode: _diaryFocusNode,
-                                            onChanged: (text) {
-                                              if (_diaryChanged == false) {
-                                                setState(() {
-                                                  _diaryChanged = true;
-                                                });
-                                              }
-                                            },
-                                          ),
-                                        ),
-                                      ],
-                                    )
-                                ),
-                                SizedBox(height: 8),
-                                Divider(color: Colors.white38,
-                                    thickness: 1,
-                                    height: divHeight),
-                                getAdKakaoFit('Attendi-web-userScreen3'),
-                                Divider(color: Colors.white38,
-                                    thickness: 1,
-                                    height: divHeight),
-                              ],
-                            )
-                        ),
-                      )
-
-                  )
-                }
-              }
+                children: [
+                  Expanded(child: buildDailyWorkInput()),
+                  buildSaveButton()
+                ],
+              )
             ],
+          ) : Column(
+              children: [
+              _buildCalendar(),
+                if(!_fillCalendar) ...{
+                  if(_calendarExpand == false)...{
+                    Expanded(
+                      child: buildDailyWorkInput(),
+                    ),
+                    buildSaveButton()
+                  }
+                },
+                //getAdBanner('small-size-banner')
+              ],
           ),
           floatingActionButton: _buildFloatingActionButton(),
+          floatingActionButtonLocation: isWideMode() ? FloatingActionButtonLocation.centerFloat : FloatingActionButtonLocation.endFloat,
         )
+    );
+  }
+
+  Widget buildSaveButton(){
+    return Container(
+      constraints: isWideMode() ? BoxConstraints(
+          maxWidth: 380
+      ) : null,
+      color: Colors.black38,
+      width: MediaQuery.of(context).size.width,
+      height: 45,
+      child: TextButton(
+
+        child: Text('저장', style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),),
+        onPressed: () async{
+          bool changed = false;
+          List<ExpenseItem> tempExpense = [];
+          for(int i = 0; i < _listExpense.length; i++){
+            if(_listExpense[i].type != null && _listExpense[i].type!.length > 0){
+              if(_listExpense[i].money != null && _listExpense[i].money!.length > 0){
+
+              }
+              else{
+                Fluttertoast.showToast(msg: '지출 내역 오류! 지출 금액을 입력하세요.', timeInSecForIosWeb: 2, webPosition: "center", backgroundColor: Colors.redAccent,);
+                return;
+              }
+            }
+
+            if(_listExpense[i].detail != null && _listExpense[i].detail!.length > 0){
+              if(_listExpense[i].money != null && _listExpense[i].money!.length > 0){
+
+              }
+              else{
+                Fluttertoast.showToast(msg: '지출 내역 오류! 지출 금액을 입력하세요.', timeInSecForIosWeb: 2, webPosition: "center", backgroundColor: Colors.redAccent,);
+                return;
+              }
+            }
+
+            if(_listExpense[i].money != null && _listExpense[i].money!.length > 0){
+              if(_listExpense[i].type != null && _listExpense[i].type!.length > 0){
+                tempExpense.add(_listExpense[i]);
+              }
+              else{
+                Fluttertoast.showToast(msg: '지출 내역 오류! 지출 유형을 선택하세요.', timeInSecForIosWeb: 2, webPosition: "center", backgroundColor: Colors.redAccent,);
+                return;
+              }
+            }
+          }
+
+          int curIdx = 0;
+          for(int i = 0; i < _checkList.length; i++){
+            if(_checkList[i].writetime.isBefore(_selectedDate) || _checkList[i].writetime.isAtSameMomentAs(_selectedDate)){
+              if(curChecked[curIdx] != null){
+                setState((){
+                  if(curChecked[curIdx++]!){
+                    if(_checkList[i].checked[_selectedDate] == null || _checkList[i].checked[_selectedDate] == 'false'){
+                      _checkList[i].checked[_selectedDate] = widget.user;
+                    }
+                  }
+                  else{
+                    _checkList[i].checked[_selectedDate] = 'false';
+                  }
+
+                });
+                BranchDatabase.addCheckItem(companyId: widget.companyId, branch: widget.workplace
+                    , checkId: i, key: _selectedDateDB, value: (_checkList[i].checked[_selectedDate]??'false'));
+              }
+            }
+          }
+          for(int i = 0; i < _listExpenseOrg.length; i++){
+            await UserDatabase.deleteExpenseDoc(companyId: widget.companyId, userUid: _userId,
+                date: _selectedDateDB, expenseId: i);
+          }
+          for(int i = 0; i < tempExpense.length; i++){
+            if(tempExpense[i].type != null && tempExpense[i].type!.length > 0){
+              UserDatabase.addUserDateExpenseItem(
+                  companyId: widget.companyId,
+                  userUid: _userId,
+                  date: _selectedDateDB,
+                  expenseId: i,
+                  key: "type",
+                  value: tempExpense[i].type!);
+            }
+            if(tempExpense[i].money != null && tempExpense[i].money!.length > 0){
+              UserDatabase.addUserDateExpenseItem(
+                  companyId: widget.companyId,
+                  userUid: _userId,
+                  date: _selectedDateDB,
+                  expenseId: i,
+                  key: "money",
+                  value: tempExpense[i].money!);
+            }
+            if(tempExpense[i].detail != null && tempExpense[i].detail!.length > 0){
+              UserDatabase.addUserDateExpenseItem(
+                  companyId: widget.companyId,
+                  userUid: _userId,
+                  date: _selectedDateDB,
+                  expenseId: i,
+                  key: "detail",
+                  value: tempExpense[i].detail!);
+            }
+          }
+
+          if(_inputController.text != _branchDiaryFormat){
+            setState((){
+              _workDiary[_selectedDate] = _inputController.text;
+            });
+
+            if(_workDiary[_selectedDate] != null && _workDiary[_selectedDate]!.length > 0) {
+              UserDatabase.addUserDateItem(
+                  companyId: widget.companyId,
+                  userUid: _userId,
+                  date: _selectedDateDB,
+                  key: "text",
+                  value: _workDiary[_selectedDate]!);
+              changed = true;
+            }
+          }
+
+          if (_selectedTimeFrom != null && _selectedTimeTo != null) {
+            setState((){
+              _startTime[_selectedDate] = _selectedTimeFrom!;
+              _endTime[_selectedDate] = _selectedTimeTo!;
+            });
+            UserDatabase.addUserDateItem(companyId: widget.companyId,
+                userUid: _userId,
+                date: _selectedDateDB,
+                key: "start",
+                value: _selectedTimeFrom!.format(context));
+
+
+            UserDatabase.addUserDateItem(companyId: widget.companyId,
+                userUid: _userId,
+                date: _selectedDateDB,
+                key: "end",
+                value: _selectedTimeTo!.format(context));
+
+            if(_selectedRestHour != null && _selectedRestHour >= 0){
+              setState((){
+                _restTime[_selectedDate] = _selectedRestHour;
+              });
+
+              UserDatabase.addUserDateItem(companyId: widget.companyId,
+                  userUid: _userId,
+                  date: _selectedDateDB,
+                  key: "rest",
+                  value: _selectedRestHour.toString());
+            }
+            changed = true;
+          }
+          _getDurationTime(_selectedDate);
+
+          //_fillCalendar = true;
+          //_calendarFormat = CalendarFormat.month;
+          if(changed){
+            setState((){
+              _calendarExpand = true;
+              _calendarHeight += 1;
+              _calendarExpandDuration = 10;
+            });
+
+            Fluttertoast.showToast(msg: '근무기록이 저장되었습니다.', timeInSecForIosWeb: 2, webPosition: "center");
+
+            if(kIsWeb){
+              showDialog<String>(
+                  context: context,
+                  builder: (BuildContext context) => WillPopScope(
+                    onWillPop: () async{
+                      return false;
+                    },
+                    child: AlertDialog(
+                        contentPadding: EdgeInsets.zero,
+                        backgroundColor: Colors.black38,
+                        content: Stack(
+                          children: [
+                            getAdBanner('square-banner'),
+                            Container(
+                              constraints: BoxConstraints(maxWidth: 40, maxHeight: 30),
+                              alignment: Alignment.topLeft,
+                              child: WebViewAware(
+                                child:  IconButton(
+                                  highlightColor: Colors.transparent,
+                                  focusColor: Colors.transparent,
+                                  splashColor: Colors.transparent,
+                                  icon: Icon(Icons.cancel_rounded, color: Colors.grey, size: 20,),
+                                  onPressed:(){
+                                    Navigator.pop(context, 'Cancel');
+                                  },
+                                ),
+                              ),
+                            ),
+                          ],
+                        )
+
+                    ),
+                  )
+              );
+            }
+            else{
+              if(defaultTargetPlatform == TargetPlatform.iOS){
+                print('InterstitialAd showed');
+                if(_interstitialAd != null){
+
+                  _interstitialAd.show();
+                  InterstitialAd.load(
+                      adUnitId: FULL_UNIT_ID,
+                      request: AdRequest(),
+                      adLoadCallback: InterstitialAdLoadCallback(
+                        onAdLoaded: (InterstitialAd ad) {
+                          // Keep a reference to the ad so you can show it later.
+                          _interstitialAd = ad;
+                          print('InterstitialAd loaded');
+                        },
+                        onAdFailedToLoad: (LoadAdError error) {
+                          print('InterstitialAd failed to load: $error');
+                        },
+                      ));
+
+                }
+              }
+            }
+
+          }
+          else{
+            Fluttertoast.showToast(msg: '근무기록 오류! 근무 시간을 확인하세요', timeInSecForIosWeb: 2, webPosition: "center", backgroundColor: Colors.redAccent,);
+          }
+        },
+
+      ),
+    );
+  }
+
+  bool isWideMode(){
+    if(MediaQuery.of(context).size.width >= wideModeThres){
+      return true;
+    }
+    return false;
+  }
+
+  Widget buildDailyWorkInput(){
+    return Container(
+      alignment: Alignment.topCenter,
+      color: Color(0xFF333A47),
+      constraints: isWideMode() ? BoxConstraints(
+          maxWidth: 380
+      ) : null,
+      child: SingleChildScrollView(
+          controller: _userScrollController,
+          child: Column(
+            children: [
+              /*
+              getAdBanner('mid-size-banner'),
+              Divider(
+                  color: Colors.white38,
+                  thickness: 1,
+                  height: 1),
+               */
+              Padding(
+                  padding: EdgeInsets.only(left: 10, top: 10),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Icon(Icons.work_history_outlined,
+                        color: Colors.white,),
+                      Text(' 근무 시간',
+                        style: TextStyle(
+                            fontSize: 17, color: Colors.white),
+                        textAlign: TextAlign.center,),
+                    ],
+                  )
+              ),
+              Container(
+                padding: EdgeInsets.only(
+                    top: 15, left: 20, right: 20),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment
+                      .spaceAround,
+                  children: [
+                    TextButton(
+                        style: ButtonStyle(
+                          overlayColor: MaterialStateColor
+                              .resolveWith((states) =>
+                          Colors.white38),
+                          backgroundColor: MaterialStateColor
+                              .resolveWith((states) =>
+                          _selectFromTo == "from"
+                              ? Colors.white38
+                              : Colors.transparent),
+
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            if (_selectFromTo == "from") {
+                              _selectFromTo = "";
+                            }
+                            else {
+                              _selectFromTo = "from";
+                              _timeStreamCon.add(
+                                  convertTimeToDateTime(
+                                      _selectedTimeFrom));
+                            }
+                          });
+                        },
+                        child: Text(_selectedTimeFrom != null
+                            ? (_selectedTimeFrom!.format(context))
+                            : TimeOfDay(hour: TimeOfDay
+                            .now()
+                            .hour, minute: (TimeOfDay
+                            .now()
+                            .minute / 30).floor() * 30).format(
+                            context),
+                          style: TextStyle(color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 20),
+                        )
+                    ),
+                    Icon(Icons.arrow_forward,
+                      color: Colors.white38,),
+                    TextButton(
+                        style: ButtonStyle(
+                          overlayColor: MaterialStateColor
+                              .resolveWith((states) =>
+                          Colors.white38),
+                          backgroundColor: MaterialStateColor
+                              .resolveWith((states) =>
+                          _selectFromTo == "to"
+                              ? Colors.white38
+                              : Colors.transparent),
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            if (_selectFromTo == "to") {
+                              _selectFromTo = "";
+                            }
+                            else {
+                              _selectFromTo = "to";
+                              _timeStreamCon.add(
+                                  convertTimeToDateTime(
+                                      _selectedTimeTo));
+                            }
+                          });
+                        },
+                        child: Text(_selectedTimeTo != null
+                            ? (_selectedTimeTo!.format(context))
+                            : TimeOfDay(hour: TimeOfDay
+                            .now()
+                            .hour, minute: (TimeOfDay
+                            .now()
+                            .minute / 30).floor() * 30).format(
+                            context),
+                          style: TextStyle(color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 20),
+                        )
+                    ),
+                  ],
+                ),
+              ),
+
+              AnimatedContainer(
+                height: _selectFromTo == "from" ? 150 : 0,
+                duration: Duration(milliseconds: 300),
+                onEnd: () {
+                  _updateSelectedRestHour();
+                },
+                child: Container(
+                  height: 150,
+                  child: (_selectFromTo == "from") ? getTimeSlider(_selectedTimeFrom) : Container(),
+                ),
+              ),
+              AnimatedContainer(
+                height: _selectFromTo == "to" ? 150 : 0,
+                duration: Duration(milliseconds: 300),
+                onEnd: () {
+                  _updateSelectedRestHour();
+                },
+                child: Container(
+                  height: 150,
+                  child: (_selectFromTo == "to") ? getTimeSlider(_selectedTimeTo) : Container(),
+                ),
+              ),
+              Divider(
+                  color: Colors.black26,
+                  thickness: 7,
+                  height: divHeight),
+              Padding(
+                  padding: EdgeInsets.only(
+                      left: 10, top: 0, bottom: 10),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Icon(Icons.forest, color: Colors.white,
+                        size: 22,),
+                      Text(' 휴식 시간',
+                        style: TextStyle(
+                          fontSize: 17, color: Colors.white,),
+                        textAlign: TextAlign.center,),
+                    ],
+                  )
+              ),
+              SizedBox(height: 4),
+              SizedBox(
+                height: 45,
+                child: ListView.builder(
+                  key: _restTimeListKey,
+                  controller: _scrollController,
+                  scrollDirection: Axis.horizontal,
+                  padding: EdgeInsets.only(left: 20),
+                  itemCount: _restTimeRef.length,
+                  itemExtent: 90,
+                  itemBuilder: (BuildContext context, int index) {
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 8.0),
+                      child: TimeButton(
+                          borderColor: Colors.white38,
+                          activeBorderColor: Colors.white,
+                          backgroundColor: Color(0xFF333A47),
+                          activeBackgroundColor: Color(
+                              0xFF333A47),
+                          textStyle: TextStyle(
+                              fontWeight: FontWeight.normal,
+                              color: Colors.white38),
+                          activeTextStyle: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white),
+                          time: _restTimeRef[index].toString() +
+                              ' 시간',
+                          value: _selectedRestHour ==
+                              _restTimeRef[index],
+                          onSelect: (_) =>
+                              setState(() {
+                                _selectRestHour(
+                                    index, _restTimeRef[index]);
+                                //_getDurationTime(_selectedDate);
+                              })
+                      ),
+                    );
+                  },
+                ),
+              ),
+              SizedBox(height: 4,),
+              Divider(color: Colors.black26,
+                  thickness: 7,
+                  height: divHeight),
+              Padding(
+                  padding: EdgeInsets.only(
+                      left: 10, top: 0, bottom: 10),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Container(
+                        padding: EdgeInsets.only(top: 4),
+                        child: Icon(Icons.attach_money,
+                          color: Colors.white, size: 25,),
+                      ),
+                      Text(' 지출 내역',
+                        style: TextStyle(
+                            fontSize: 17, color: Colors.white),
+                        textAlign: TextAlign.center,),
+                    ],
+                  )
+              ),
+              _buildExpenseList(),
+              SizedBox(height: 4),
+              Divider(color: Colors.black26,
+                  thickness: 7,
+                  height: divHeight,),
+              _buildChecklist(),
+              if(curChecked.length > 0) SizedBox(height: 4),
+              if(curChecked.length > 0) Divider(color: Colors.black26,
+                  thickness: 7,
+                  height: divHeight),
+              Padding(
+                  padding: EdgeInsets.only(
+                      left: 10, top: 0, bottom: 10),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Container(
+                        padding: EdgeInsets.only(top: 4),
+                        child: Icon(Icons.note_alt_outlined,
+                          color: Colors.white, size: 25,),
+                      ),
+                      Text(' 업무 일지',
+                        style: TextStyle(
+                            fontSize: 17, color: Colors.white),
+                        textAlign: TextAlign.center,),
+                    ],
+                  )
+              ),
+              Container(
+                  margin: EdgeInsets.fromLTRB(20, 5, 20, 0),
+                  padding: EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Color(0xFF333A47),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                        color: Colors.white70
+                    ),
+                  ),
+                  child: Column(
+                    children: [
+                      Container(
+                        padding: EdgeInsets.fromLTRB(0, 0, 0, 10),
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          _getWorkDiaryHdr(), style: TextStyle(
+                          fontSize: 15,
+                          color: Colors.blueAccent[100],),),
+                      ),
+                      SingleChildScrollView(
+                        scrollDirection: Axis.vertical,
+                        child:
+                        TextFormField(
+                          decoration: InputDecoration(
+                            enabledBorder: UnderlineInputBorder(
+                              borderSide: BorderSide(
+                                  color: Colors.white70),
+                            ),
+                            focusedBorder: UnderlineInputBorder(
+                              borderSide: BorderSide(
+                                  color: Colors.white70),
+                            ),
+                          ),
+                          controller: _inputController,
+                          keyboardType: TextInputType.multiline,
+                          maxLines: null,
+                          autofocus: false,
+                          style: TextStyle(
+                              fontSize: 15, color: Colors
+                              .white70),
+
+                          focusNode: _diaryFocusNode,
+                          onChanged: (text) {
+                            if (_diaryChanged == false) {
+                              setState(() {
+                                _diaryChanged = true;
+                              });
+                            }
+                          },
+                        ),
+                      ),
+                    ],
+                  )
+              ),
+              SizedBox(height: 50,)
+
+              /*
+              getAdBanner('big-size-banner'),
+              Divider(color: Colors.white38,
+                  thickness: 1,
+                  height: divHeight),
+               */
+            ],
+          )
+      ),
     );
   }
 
@@ -712,7 +1038,10 @@ class _TimeLineState extends State<TimeLinePage> {
             return TextButton(
                 onPressed: (){
                   setState(() {
-                    _listExpense.add(ExpenseItem());
+                    var exp = ExpenseItem();
+                    exp.moneyController = TextEditingController();
+                    exp.detailController = TextEditingController();
+                    _listExpense.add(exp);
                     double curoffset = _userScrollController.offset;
                     _userScrollController.animateTo(curoffset + 146,
                         duration: Duration(milliseconds: 300), curve: Curves.easeIn);
@@ -779,7 +1108,7 @@ class _TimeLineState extends State<TimeLinePage> {
                                 padding: EdgeInsets.only(left: 10, bottom: 5),
                                 child:
                                 TextFormField(
-                                  initialValue: _listExpense[index].money,
+                                  controller: _listExpense[index].moneyController,
                                   decoration: InputDecoration(
                                     enabledBorder: UnderlineInputBorder(
                                       borderSide: BorderSide(
@@ -824,7 +1153,7 @@ class _TimeLineState extends State<TimeLinePage> {
                           padding: EdgeInsets.all(5),
                           child:
                           TextFormField(
-                            initialValue: _listExpense[index].detail,
+                            controller: _listExpense[index].detailController,
                             keyboardType: TextInputType.multiline,
                             maxLines: null,
                             decoration: InputDecoration(
@@ -863,7 +1192,7 @@ class _TimeLineState extends State<TimeLinePage> {
       _checkList.forEach((element) {
         if(element.writetime.isBefore(_selectedDate) || element.writetime.isAtSameMomentAs(_selectedDate)){
           curCheckTitle.add(element.name);
-          curChecked.add(element.checked[_selectedDate] == 'false' ? false : true);
+          curChecked.add((element.checked[_selectedDate] == null || element.checked[_selectedDate] == 'false') ? false : true);
         }
       });
     });
@@ -927,7 +1256,7 @@ class _TimeLineState extends State<TimeLinePage> {
         elevation: 5,
         child: AnimatedContainer(
           color: Colors.black38,
-            height: _calendarHeight,
+            height: isWideMode() ? MediaQuery.of(context).size.height : _calendarHeight,
             onEnd: (){
               setState((){
                 int dur = 300;
@@ -1011,7 +1340,7 @@ class _TimeLineState extends State<TimeLinePage> {
                         _updateSelectedRestHour();
                       }
 
-                      if(isSameDay(_focusDay,focused) && _calendarFormat == CalendarFormat.month){
+                      if(isSameDay(_focusDay,focused) && _calendarFormat == CalendarFormat.month && !isWideMode()){
                         //_calendarFormat = CalendarFormat.twoWeeks;
                         //_fillCalendar = false;
                         _calendarExpand = false;
@@ -1061,7 +1390,7 @@ class _TimeLineState extends State<TimeLinePage> {
                 setState((){
                   //_calendarFormat = format;
 
-                  if(format == CalendarFormat.week){
+                  if(format == CalendarFormat.week && !isWideMode()){
                     //_fillCalendar = false;
                     //_calendarFormat = CalendarFormat.twoWeeks;
                     _calendarExpand = false;
@@ -1294,7 +1623,6 @@ class _TimeLineState extends State<TimeLinePage> {
 
   void getDataFromUserDoc(String userId) {
     UserDatabase.getUserCollection(companyId: widget.companyId).get().then((QuerySnapshot querySnapshot){
-      bool noticeShow = true;
       querySnapshot.docs.forEach((doc) {
         if(doc.id == userId){
           var userInfo = doc.data()! as Map<String, dynamic>;
@@ -1306,18 +1634,6 @@ class _TimeLineState extends State<TimeLinePage> {
                   _userLocked = true;
                 }
               }
-              if(key == 'noticeShow'){
-                if(value != null && value.length > 0){
-                  DateTime date = DateFormat('yyyy-MM-dd').parse(value);
-                  //date = date.subtract(Duration(days: 6));
-                  if(date.isBefore(DateTime.now().subtract(Duration(days: 1)))){
-                    noticeShow = true;
-                  }
-                  else{
-                    noticeShow = false;
-                  }
-                }
-              }
             });
           }
         }
@@ -1326,23 +1642,64 @@ class _TimeLineState extends State<TimeLinePage> {
       if(noticeShow){
         showDialog<String>(
           context: context,
-          builder: (BuildContext context) => AlertDialog(
-            contentPadding: EdgeInsets.all(5),
-            backgroundColor: Color(0xFF333A47),
-            title: Text(_branchNotice.length > 0 ? '공지사항' : '광고', style: TextStyle(fontSize: 15, color: Colors.white)),
-            content: Container(
-              margin: EdgeInsets.all(5),
+          builder: (BuildContext context) => WillPopScope(
+            onWillPop: () async{
+              return false;
+            },
+            child: AlertDialog(
+                contentPadding: EdgeInsets.zero,
+                backgroundColor: Colors.black38,
+                content: Stack(
+                  children: [
+                    Container(
+                      child: SingleChildScrollView(
+                          padding: EdgeInsets.zero,
 
-                constraints : BoxConstraints(maxHeight: 400),
-                child: SingleChildScrollView(
-                    child: Column(
-                      children: [
-                        getAdKakaoFit('Attendi-web-userScreen4'),
-                        if(_branchNotice.length > 0) Text(_branchNotice,style: TextStyle(color: Colors.white70), textAlign: TextAlign.left,),
-                      ],
-                    )
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              getAdBanner('square-banner'),
+
+                              if(_branchNotice.length > 0) Container(
+                                constraints: BoxConstraints(maxWidth: 260),
+                                margin: EdgeInsets.zero,
+                                padding: EdgeInsets.all(10),
+                                alignment: Alignment.centerLeft,
+                                child: Text('공지사항', style: TextStyle(fontSize: 15, color: Colors.white), textAlign: TextAlign.start,),
+                              ),
+                              if(_branchNotice.length > 0) Container(
+                                constraints: BoxConstraints(maxWidth: 260),
+                                margin: EdgeInsets.zero,
+                                padding: EdgeInsets.all(10),
+                                alignment: Alignment.centerLeft,
+                                child: Text(_branchNotice,style: TextStyle(color: Colors.white70), textAlign: TextAlign.start,),
+                              )
+                            ],
+                          )
+                      ),
+                    ),
+                    Container(
+                      constraints: BoxConstraints(maxWidth: 40, maxHeight: 30),
+                      alignment: Alignment.topLeft,
+                      child: WebViewAware(
+                        child:  IconButton(
+                          highlightColor: Colors.transparent,
+                          focusColor: Colors.transparent,
+                          splashColor: Colors.transparent,
+                          icon: Icon(Icons.cancel_rounded, color: Colors.grey, size: 20,),
+                          onPressed:(){
+                            SharedPreferences.getInstance().then((prefs) {
+                              prefs.setString('noticeshow', DateTime.now().toString());
+                              Navigator.pop(context, 'Cancel');
+                            });
+                          },
+                        ),
+                      ),
+                    ),
+                  ],
                 )
-        ),
+
+              /*
             actions: <Widget>[
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1363,6 +1720,9 @@ class _TimeLineState extends State<TimeLinePage> {
                 ],
               )
             ],
+
+             */
+            ),
           )
         );
       }
@@ -1409,23 +1769,27 @@ class _TimeLineState extends State<TimeLinePage> {
                   if (value != null && value.length > 0) {
                     _workDiary[date] = value;
                   }
-
-                  _inputController.text = _workDiary[_selectedDate]??_branchDiaryFormat;
                 }
               });
-              _totalWorkingTime = _updateTotalWorkingTime(_selectedDate);
-              _selectedRestHour = _restTime[_selectedDate] ?? 0;
 
-              _selectedTimeFrom = _startTime[_selectedDate] ?? TimeOfDay(hour: TimeOfDay.now().hour, minute: (TimeOfDay.now().minute / _minuteInterval).floor() * _minuteInterval);
-              _selectedTimeTo = _endTime[_selectedDate] ?? TimeOfDay(hour: TimeOfDay.now().hour, minute: (TimeOfDay.now().minute / _minuteInterval).floor() * _minuteInterval);
-
-              if (_restTime[_selectedDate] != null) {
-                //_updateSelectedRestHour();
-              }
-              _updateRestTimeRef(_selectedDate);
             });
           }
         }
+      });
+
+      setState(() {
+        _inputController.text = _workDiary[_selectedDate]??_branchDiaryFormat;
+
+        _totalWorkingTime = _updateTotalWorkingTime(_selectedDate);
+        _selectedRestHour = _restTime[_selectedDate] ?? 0;
+
+        _selectedTimeFrom = _startTime[_selectedDate] ?? TimeOfDay(hour: TimeOfDay.now().hour, minute: (TimeOfDay.now().minute / _minuteInterval).floor() * _minuteInterval);
+        _selectedTimeTo = _endTime[_selectedDate] ?? TimeOfDay(hour: TimeOfDay.now().hour, minute: (TimeOfDay.now().minute / _minuteInterval).floor() * _minuteInterval);
+
+        if (_restTime[_selectedDate] != null) {
+          //_updateSelectedRestHour();
+        }
+        _updateRestTimeRef(_selectedDate);
       });
     });
   }
@@ -1451,6 +1815,11 @@ class _TimeLineState extends State<TimeLinePage> {
           }
         });
         setState((){
+          expenseItem.moneyController = TextEditingController();
+          expenseItem.detailController = TextEditingController();
+          expenseItem.moneyController!.text = expenseItem.money??'';
+          expenseItem.detailController!.text = expenseItem.detail??'';
+
           _listExpense.add(expenseItem);
           _listExpenseOrg.add(expenseItem);
         });
@@ -1565,294 +1934,144 @@ class _TimeLineState extends State<TimeLinePage> {
     return total;
   }
 
-  Widget? _buildFloatingActionButton() {
-    if(!_fillCalendar){
-      return
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            Container(
-              margin: EdgeInsets.only(right: 10),
-              height: 40,
-              width: 80,
-              alignment: Alignment.center,
-              child:
-                  WebViewAware(
-                    child: FloatingActionButton.extended(
-                      elevation: 5,
-                      backgroundColor: Colors.blue[300],
-                      icon: Icon(Icons.undo, color: Colors.white,),
-                      label: Text('취소', style: TextStyle(color: Colors.white70)),
-                      extendedIconLabelSpacing: 5,
-                      onPressed: (){
-                        setState((){
-                          //_fillCalendar = true;
-                          //_calendarFormat = CalendarFormat.month;
-                          _calendarExpand = true;
-                          _calendarHeight += 1;
-                          _calendarExpandDuration = 10;
-                        });
-                      },
-                    ),
-                  ),
-            ),
-            Container(
-              height: 40,
-              width: 80,
-              alignment: Alignment.center,
-              child: WebViewAware(
-                child: FloatingActionButton.extended(
-                  elevation: 5,
-                  backgroundColor: Colors.redAccent[100],
-                  icon: Icon(Icons.save, color: Colors.white,),
-                  label: Text('저장', style: TextStyle(color: Colors.white70)),
-                  extendedIconLabelSpacing: 5,
-                  onPressed: () async{
-                    bool changed = false;
-                    List<ExpenseItem> tempExpense = [];
-                    for(int i = 0; i < _listExpense.length; i++){
-                      if(_listExpense[i].type != null && _listExpense[i].type!.length > 0){
-                        if(_listExpense[i].money != null && _listExpense[i].money!.length > 0){
-
-                        }
-                        else{
-                          Fluttertoast.showToast(msg: '지출 내역 오류! 지출 금액을 입력하세요.', timeInSecForIosWeb: 2, webPosition: "center", backgroundColor: Colors.redAccent,);
-                          return;
-                        }
-                      }
-
-                      if(_listExpense[i].detail != null && _listExpense[i].detail!.length > 0){
-                        if(_listExpense[i].money != null && _listExpense[i].money!.length > 0){
-
-                        }
-                        else{
-                          Fluttertoast.showToast(msg: '지출 내역 오류! 지출 금액을 입력하세요.', timeInSecForIosWeb: 2, webPosition: "center", backgroundColor: Colors.redAccent,);
-                          return;
-                        }
-                      }
-
-                      if(_listExpense[i].money != null && _listExpense[i].money!.length > 0){
-                        if(_listExpense[i].type != null && _listExpense[i].type!.length > 0){
-                          tempExpense.add(_listExpense[i]);
-                        }
-                        else{
-                          Fluttertoast.showToast(msg: '지출 내역 오류! 지출 유형을 선택하세요.', timeInSecForIosWeb: 2, webPosition: "center", backgroundColor: Colors.redAccent,);
-                          return;
-                        }
-                      }
-                    }
-
-                    int curIdx = 0;
-                    for(int i = 0; i < _checkList.length; i++){
-                      if(_checkList[i].writetime.isBefore(_selectedDate) || _checkList[i].writetime.isAtSameMomentAs(_selectedDate)){
-                        if(curChecked[curIdx] != null){
-                          setState((){
-                            if(curChecked[curIdx++]!){
-                              if(_checkList[i].checked[_selectedDate] == 'false'){
-                                _checkList[i].checked[_selectedDate] = widget.user;
-                              }
-                            }
-                            else{
-                              _checkList[i].checked[_selectedDate] = 'false';
-                            }
-
-                          });
-                          BranchDatabase.addCheckItem(companyId: widget.companyId, branch: widget.workplace
-                              , checkId: i, key: _selectedDateDB, value: (_checkList[i].checked[_selectedDate]??'false'));
-                        }
-                      }
-                    }
-                    for(int i = 0; i < _listExpenseOrg.length; i++){
-                      await UserDatabase.deleteExpenseDoc(companyId: widget.companyId, userUid: _userId,
-                          date: _selectedDateDB, expenseId: i);
-                    }
-                    for(int i = 0; i < tempExpense.length; i++){
-                      if(tempExpense[i].type != null && tempExpense[i].type!.length > 0){
-                        UserDatabase.addUserDateExpenseItem(
-                            companyId: widget.companyId,
-                            userUid: _userId,
-                            date: _selectedDateDB,
-                            expenseId: i,
-                            key: "type",
-                            value: tempExpense[i].type!);
-                      }
-                      if(tempExpense[i].money != null && tempExpense[i].money!.length > 0){
-                        UserDatabase.addUserDateExpenseItem(
-                            companyId: widget.companyId,
-                            userUid: _userId,
-                            date: _selectedDateDB,
-                            expenseId: i,
-                            key: "money",
-                            value: tempExpense[i].money!);
-                      }
-                      if(tempExpense[i].detail != null && tempExpense[i].detail!.length > 0){
-                        UserDatabase.addUserDateExpenseItem(
-                            companyId: widget.companyId,
-                            userUid: _userId,
-                            date: _selectedDateDB,
-                            expenseId: i,
-                            key: "detail",
-                            value: tempExpense[i].detail!);
-                      }
-                    }
-
-                    if(_inputController.text != _branchDiaryFormat){
-                      setState((){
-                        _workDiary[_selectedDate] = _inputController.text;
-                      });
-
-                      if(_workDiary[_selectedDate] != null && _workDiary[_selectedDate]!.length > 0) {
-                        UserDatabase.addUserDateItem(
-                            companyId: widget.companyId,
-                            userUid: _userId,
-                            date: _selectedDateDB,
-                            key: "text",
-                            value: _workDiary[_selectedDate]!);
-                        changed = true;
-                      }
-                    }
-
-                    if (_selectedTimeFrom != null && _selectedTimeTo != null) {
-                      setState((){
-                        _startTime[_selectedDate] = _selectedTimeFrom!;
-                        _endTime[_selectedDate] = _selectedTimeTo!;
-                      });
-                      UserDatabase.addUserDateItem(companyId: widget.companyId,
-                          userUid: _userId,
-                          date: _selectedDateDB,
-                          key: "start",
-                          value: _selectedTimeFrom!.format(context));
-
-
-                      UserDatabase.addUserDateItem(companyId: widget.companyId,
-                          userUid: _userId,
-                          date: _selectedDateDB,
-                          key: "end",
-                          value: _selectedTimeTo!.format(context));
-
-                      if(_selectedRestHour != null && _selectedRestHour >= 0){
-                        setState((){
-                          _restTime[_selectedDate] = _selectedRestHour;
-                        });
-
-                        UserDatabase.addUserDateItem(companyId: widget.companyId,
-                            userUid: _userId,
-                            date: _selectedDateDB,
-                            key: "rest",
-                            value: _selectedRestHour.toString());
-                      }
-                      changed = true;
-                    }
-                    _getDurationTime(_selectedDate);
-
+  Widget buildDailyFloatingButton(){
+    return
+      Row(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: [
+          if(false) Container(
+            margin: EdgeInsets.only(right: 10),
+            height: 40,
+            width: 80,
+            alignment: Alignment.center,
+            child:
+            WebViewAware(
+              child: FloatingActionButton.extended(
+                elevation: 5,
+                backgroundColor: Colors.blue[300],
+                icon: Icon(Icons.undo, color: Colors.white,),
+                label: Text('취소', style: TextStyle(color: Colors.white70)),
+                extendedIconLabelSpacing: 5,
+                onPressed: (){
+                  setState((){
                     //_fillCalendar = true;
                     //_calendarFormat = CalendarFormat.month;
-                    if(changed){
-                      setState((){
-                        _calendarExpand = true;
-                        _calendarHeight += 1;
-                        _calendarExpandDuration = 10;
-                      });
-
-                      Fluttertoast.showToast(msg: '근무기록이 저장되었습니다.', timeInSecForIosWeb: 2, webPosition: "center");
-                    }
-                    else{
-                      Fluttertoast.showToast(msg: '근무기록 오류! 근무 시간을 확인하세요', timeInSecForIosWeb: 2, webPosition: "center", backgroundColor: Colors.redAccent,);
-                    }
-                  },
-                ),),
-            )
-          ],
-        );
-    }
-    else{
-      return  SpeedDial(
-        overlayOpacity: 0,
-        elevation: 5,
-        buttonSize: Size(40,40),
-        childrenButtonSize: Size(40,40),
-        backgroundColor: Colors.teal[200],
-        icon: Icons.menu,
-        iconTheme: IconThemeData(color: Colors.white),
-        activeIcon: Icons.close,
-        spacing: 3,
-        childPadding: const EdgeInsets.all(5),
-        spaceBetweenChildren: 4,
-        direction: SpeedDialDirection.up,
-        children: [
-          SpeedDialChild(
-              labelShadow: [BoxShadow(color: Colors.black12), BoxShadow(color: Colors.black12)],
-              backgroundColor: Colors.redAccent[100],
-              labelBackgroundColor: Colors.blueGrey,
-              child: Icon(Icons.delete_outline, color: Colors.white),
-              label: '근무기록 삭제',
-              labelStyle: TextStyle(color: Colors.white),
-              onTap: () {
-                showDialog<String>(
-                  context: context,
-                  builder: (BuildContext context) =>
-                      AlertDialog(
-                        backgroundColor: Color(0xFF333A47),
-                        title: Text(
-                          _selectedDate.month.toString() + '월 ' +
-                              _selectedDate.day.toString() + '일', style: TextStyle(color: Colors.white70),),
-                        content: const Text('근무 기록을 삭제하시겠습니까?', style: TextStyle(color: Colors.white70)),
-                        actions: <Widget>[
-                          TextButton(
-                            onPressed:
-                            (() async {
-                              await UserDatabase.deleteDoc(
-                                  companyId: widget.companyId,
-                                  userUid: _userId,
-                                  date: DateFormat('yyyy-MM-dd').format(
-                                      _selectedDate)).then((value) =>
-                                  setState(() {
-                                    _startTime.remove(_selectedDate);
-                                    _endTime.remove(_selectedDate);
-                                    _durationTime.remove(_selectedDate);
-                                    _restTime.remove(_selectedDate);
-                                    _workDiary.remove(_selectedDate);
-                                    _rangeMap.remove(_selectedDate);
-
-                                    _selectedTimeFrom = null;
-                                    _selectedTimeTo = null;
-                                    _selectedRestHour = 0;
-                                    _inputController.text = "";
-                                    _totalWorkingTime =
-                                        _updateTotalWorkingTime(
-                                            _selectedDate);
-                                  }),
-                              );
-
-                              await UserDatabase.getExpenseItemCollection(companyId: widget.companyId, userUid: _userId, date: DateFormat('yyyy-MM-dd').format(_selectedDate)).get().then((QuerySnapshot querySnapshot2) {
-                                for(int i = 0; i < querySnapshot2.docs.length; i++){
-                                  UserDatabase.deleteExpenseDoc(companyId: widget.companyId, userUid: _userId, date: DateFormat('yyyy-MM-dd').format(_selectedDate), expenseId: i);
-                                }
-                              });
-
-                              await UserDatabase.addUserDateItem(
-                                  companyId: widget.companyId,
-                                  userUid: _userId,
-                                  date: DateFormat('yyyy-MM-dd').format(
-                                      DateTime(_selectedDate.year,
-                                          _selectedDate.month)),
-                                  key: "total",
-                                  value: _totalWorkingTime.toString());
-                              Navigator.pop(context, 'Ok');
-                            }),
-                            child: Text('Ok',style: TextStyle(color: Colors.teal[200])),
-                          ),
-                          TextButton(
-                            onPressed: () =>
-                                Navigator.pop(context, 'Cancel'),
-                            child: Text('Cancel',style: TextStyle(color: Colors.teal[200])),
-                          ),
-                        ],
-                      ),);
-              }
+                    _calendarExpand = true;
+                    _calendarHeight += 1;
+                    _calendarExpandDuration = 10;
+                  });
+                },
+              ),
+            ),
           ),
-          SpeedDialChild(
+          Container(
+            height: 40,
+            width: 80,
+            alignment: Alignment.center,
+            child: WebViewAware(
+              child: FloatingActionButton.extended(
+                elevation: 5,
+                backgroundColor: Colors.redAccent[100],
+                icon: Icon(Icons.save, color: Colors.white,),
+                label: Text('저장', style: TextStyle(color: Colors.white70)),
+                extendedIconLabelSpacing: 5,
+                onPressed: () async{
+
+                },
+              ),),
+          )
+        ],
+      );
+  }
+
+  Widget buildCalendarFloatingButton(){
+    return  SpeedDial(
+      overlayOpacity: 0,
+      elevation: 5,
+      buttonSize: Size(40,40),
+      childrenButtonSize: Size(40,40),
+      backgroundColor: Colors.teal[200],
+      icon: Icons.menu,
+      iconTheme: IconThemeData(color: Colors.white),
+      activeIcon: Icons.close,
+      spacing: 3,
+      childPadding: const EdgeInsets.all(5),
+      spaceBetweenChildren: 4,
+      direction: SpeedDialDirection.up,
+      children: [
+        SpeedDialChild(
+          labelShadow: [BoxShadow(color: Colors.black12), BoxShadow(color: Colors.black12)],
+          backgroundColor: Colors.redAccent[100],
+          labelBackgroundColor: Colors.blueGrey,
+          child: Icon(Icons.delete_outline, color: Colors.white),
+          label: '근무기록 삭제',
+          labelStyle: TextStyle(color: Colors.white),
+          onTap: () {
+            showDialog<String>(
+              context: context,
+              builder: (BuildContext context) =>
+                AlertDialog(
+                  backgroundColor: Color(0xFF333A47),
+                  title: Text(
+                    _selectedDate.month.toString() + '월 ' +
+                        _selectedDate.day.toString() + '일', style: TextStyle(color: Colors.white70),),
+                  content: const Text('근무 기록을 삭제하시겠습니까?', style: TextStyle(color: Colors.white70)),
+                  actions: <Widget>[
+                    TextButton(
+                      onPressed:
+                      (() async {
+                        await UserDatabase.deleteDoc(
+                            companyId: widget.companyId,
+                            userUid: _userId,
+                            date: DateFormat('yyyy-MM-dd').format(
+                                _selectedDate)).then((value) =>
+                            setState(() {
+                              _startTime.remove(_selectedDate);
+                              _endTime.remove(_selectedDate);
+                              _durationTime.remove(_selectedDate);
+                              _restTime.remove(_selectedDate);
+                              _workDiary.remove(_selectedDate);
+                              _rangeMap.remove(_selectedDate);
+
+                              _selectedTimeFrom = null;
+                              _selectedTimeTo = null;
+                              _selectedRestHour = 0;
+                              _inputController.text = "";
+                              _totalWorkingTime =
+                                  _updateTotalWorkingTime(
+                                      _selectedDate);
+                            }),
+                        );
+
+                        await UserDatabase.getExpenseItemCollection(companyId: widget.companyId, userUid: _userId, date: DateFormat('yyyy-MM-dd').format(_selectedDate)).get().then((QuerySnapshot querySnapshot2) {
+                          for(int i = 0; i < querySnapshot2.docs.length; i++){
+                            UserDatabase.deleteExpenseDoc(companyId: widget.companyId, userUid: _userId, date: DateFormat('yyyy-MM-dd').format(_selectedDate), expenseId: i);
+                          }
+                        });
+
+                        await UserDatabase.addUserDateItem(
+                            companyId: widget.companyId,
+                            userUid: _userId,
+                            date: DateFormat('yyyy-MM-dd').format(
+                                DateTime(_selectedDate.year,
+                                    _selectedDate.month)),
+                            key: "total",
+                            value: _totalWorkingTime.toString());
+                        Navigator.pop(context, 'Ok');
+                      }),
+                      child: Text('Ok',style: TextStyle(color: Colors.teal[200])),
+                    ),
+                    TextButton(
+                      onPressed: () =>
+                          Navigator.pop(context, 'Cancel'),
+                      child: Text('Cancel',style: TextStyle(color: Colors.teal[200])),
+                    ),
+                  ],
+                ),);
+            }
+        ),
+        SpeedDialChild(
             child: _userLocked? Icon(Icons.lock_open, color: Colors.white) : Icon(Icons.lock_outline, color: Colors.white),
             backgroundColor: Colors.redAccent[100],
             labelBackgroundColor: Colors.blueGrey,
@@ -1942,93 +2161,114 @@ class _TimeLineState extends State<TimeLinePage> {
 
               });
             }
-          ),
-          SpeedDialChild(
-            child: _branchNotice.length > 0 ? Icon(Icons.notification_important_outlined, color: Colors.white,) : Icon(Icons.notifications_none, color: Colors.white,),
-            backgroundColor: Colors.redAccent[100],
-            labelBackgroundColor: Colors.blueGrey,
-            labelShadow: [BoxShadow(color: Colors.black12), BoxShadow(color: Colors.black12)],
-            label: '공지사항',
-            labelStyle: TextStyle(color: Colors.white),
-            onTap: (){
-              showDialog<String>(
-                context: context,
-                builder: (BuildContext context) => AlertDialog(
-                  backgroundColor: Color(0xFF333A47),
-                  title: const Text('공지사항', style: TextStyle(fontSize: 15, color: Colors.white)),
-                  content: Container(
-                      child: _branchNotice.length > 0 ?
-                      Text(_branchNotice,style: TextStyle(color: Colors.white70), textAlign: TextAlign.left,) :
-                      Text("등록된 공지사항이 없습니다.", style: TextStyle(color: Colors.white70),textAlign: TextAlign.left)
+        ),
+        SpeedDialChild(
+          child: _branchNotice.length > 0 ? Icon(Icons.notification_important_outlined, color: Colors.white,) : Icon(Icons.notifications_none, color: Colors.white,),
+          backgroundColor: Colors.redAccent[100],
+          labelBackgroundColor: Colors.blueGrey,
+          labelShadow: [BoxShadow(color: Colors.black12), BoxShadow(color: Colors.black12)],
+          label: '공지사항',
+          labelStyle: TextStyle(color: Colors.white),
+          onTap: (){
+            showDialog<String>(
+              context: context,
+              builder: (BuildContext context) => AlertDialog(
+                backgroundColor: Color(0xFF333A47),
+                title: const Text('공지사항', style: TextStyle(fontSize: 15, color: Colors.white)),
+                content: Container(
+                    child: _branchNotice.length > 0 ?
+                    Text(_branchNotice,style: TextStyle(color: Colors.white70), textAlign: TextAlign.left,) :
+                    Text("등록된 공지사항이 없습니다.", style: TextStyle(color: Colors.white70),textAlign: TextAlign.left)
+                ),
+                actions: <Widget>[
+                  TextButton(
+                    onPressed: () {
+                      Navigator.pop(context, 'Cancel');
+                    },
+                    child: const Text('Close'),
                   ),
-                  actions: <Widget>[
-                    TextButton(
-                      onPressed: () {
-                        Navigator.pop(context, 'Cancel');
-                      },
-                      child: const Text('Close'),
-                    ),
-                  ],
-                ),);
-            },
-          ),
-          SpeedDialChild(
-            child: Icon(Icons.no_accounts, color: Colors.white,),
-            backgroundColor: Colors.redAccent[100],
-            labelBackgroundColor: Colors.blueGrey,
-            labelShadow: [BoxShadow(color: Colors.black12), BoxShadow(color: Colors.black12)],
-            label: '회원탈퇴',
-            labelStyle: TextStyle(color: Colors.white),
-            onTap: (){
-              showDialog<String>(
-                context: context,
-                builder: (BuildContext context) => AlertDialog(
-                  backgroundColor: Color(0xFF333A47),
-                  title: const Text('회원탈퇴', style: TextStyle(fontSize: 15, color: Colors.white)),
-                  content: Container(
-                      child: Text("탈퇴하시겠습니까? 모든 기록이 삭제됩니다.", style: TextStyle(color: Colors.white70),textAlign: TextAlign.left)
-                  ),
-                  actions: <Widget>[
-                    TextButton(
-                      onPressed: () async{
-                        await UserDatabase.deleteUser(companyId: widget.companyId, userUid: _userId);
+                ],
+              ),);
+          },
+        ),
+        SpeedDialChild(
+          child: Icon(Icons.no_accounts, color: Colors.white,),
+          backgroundColor: Colors.redAccent[100],
+          labelBackgroundColor: Colors.blueGrey,
+          labelShadow: [BoxShadow(color: Colors.black12), BoxShadow(color: Colors.black12)],
+          label: '회원탈퇴',
+          labelStyle: TextStyle(color: Colors.white),
+          onTap: (){
+            showDialog<String>(
+              context: context,
+              builder: (BuildContext context) => AlertDialog(
+                backgroundColor: Color(0xFF333A47),
+                title: const Text('회원탈퇴', style: TextStyle(fontSize: 15, color: Colors.white)),
+                content: Container(
+                    child: Text("탈퇴하시겠습니까? 모든 기록이 삭제됩니다.", style: TextStyle(color: Colors.white70),textAlign: TextAlign.left)
+                ),
+                actions: <Widget>[
+                  TextButton(
+                    onPressed: () async{
+                      await UserDatabase.deleteUser(companyId: widget.companyId, userUid: _userId);
 
-                        UserDatabase.getItemCollection(companyId: widget.companyId, userUid: _userId).get().then((QuerySnapshot querySnapshot) {
-                          querySnapshot.docs.forEach((doc) {
-                            UserDatabase.deleteDoc(companyId: widget.companyId, userUid: _userId, date: doc.id);
-                            UserDatabase.getExpenseItemCollection(companyId: widget.companyId, userUid: _userId, date: doc.id).get().then((QuerySnapshot querySnapshot2) {
-                              for(int i = 0; i < querySnapshot2.docs.length; i++){
-                                UserDatabase.deleteExpenseDoc(companyId: widget.companyId, userUid: _userId, date: doc.id, expenseId: i);
-                              }
-                            });
+                      UserDatabase.getItemCollection(companyId: widget.companyId, userUid: _userId).get().then((QuerySnapshot querySnapshot) {
+                        querySnapshot.docs.forEach((doc) {
+                          UserDatabase.deleteDoc(companyId: widget.companyId, userUid: _userId, date: doc.id);
+                          UserDatabase.getExpenseItemCollection(companyId: widget.companyId, userUid: _userId, date: doc.id).get().then((QuerySnapshot querySnapshot2) {
+                            for(int i = 0; i < querySnapshot2.docs.length; i++){
+                              UserDatabase.deleteExpenseDoc(companyId: widget.companyId, userUid: _userId, date: doc.id, expenseId: i);
+                            }
                           });
                         });
+                      });
 
-                        Navigator.pop(context, 'Ok');
-                        Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                settings: RouteSettings(name: '/'+ widget.companyId),
-                                builder: (context) => UserLoginPage(companyId: widget.companyId, title: 'Attendi'))
-                        );
-                      },
-                      child: const Text('Ok'),
-                    ),
-                    TextButton(
-                      onPressed: () {
-                        Navigator.pop(context, 'Cancel');
-                      },
-                      child: const Text('Cancel'),
-                    ),
-                  ],
-                ),);
-            },
-          )
-        ],
-      );
+                      Navigator.pop(context, 'Ok');
+                      Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              settings: RouteSettings(name: '/'+ widget.companyId),
+                              builder: (context) => UserLoginPage(companyId: widget.companyId, title: 'Attendi'))
+                      );
+                    },
+                    child: const Text('Ok'),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      Navigator.pop(context, 'Cancel');
+                    },
+                    child: const Text('Cancel'),
+                  ),
+                ],
+              ),);
+          },
+        )
+      ],
+    );
+  }
 
 
+  Widget? _buildFloatingActionButton() {
+    if(isWideMode()){
+      return Padding(padding: EdgeInsets.all(10),
+        child:Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            SizedBox(width: MediaQuery.of(context).size.width - 750,),
+            buildCalendarFloatingButton(),
+            SizedBox(width: 100,),
+          ],
+        ),) ;
     }
+    else{
+      if(!_fillCalendar){
+        return null;
+      }
+      else{
+        return buildCalendarFloatingButton();
+      }
+    }
+
   }
 }
 
@@ -2038,4 +2278,6 @@ class ExpenseItem{
   String? type;
   String? money;
   String? detail;
+  TextEditingController? moneyController;
+  TextEditingController? detailController;
 }
