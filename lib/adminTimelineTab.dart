@@ -774,25 +774,37 @@ class BranchTimelinePageState extends State<BranchTimelinePage> with AutomaticKe
 
     if(_listDairyContent[date] != null){
       if(filterTypeView['근무현황'] != null && filterTypeView['근무현황']!){
-        _listDairyContent[date]!.mapBranchUserTime.keys.forEach((element) {
-          if(filterBranchView[element] == true){
-            ret = true;
+        _listDairyContent[date]!.mapBranchUserTime.forEach((key, value) {
+          if(filterBranchView[key] == true){
+            value.forEach((key, value) {
+              if(value.length > 0){
+                ret = true;
+              }
+            });
           }
         });
       }
 
       if(filterTypeView['지출현황'] != null && filterTypeView['지출현황']!) {
-        _listDairyContent[date]!.mapBranchUserExpense.keys.forEach((element) {
-          if (filterBranchView[element] == true) {
-            ret = true;
+        _listDairyContent[date]!.mapBranchUserExpense.forEach((key, value) {
+          if(filterBranchView[key] == true){
+            value.forEach((key, value) {
+              if(value.length > 0){
+                ret = true;
+              }
+            });
           }
         });
       }
 
       if(filterTypeView['체크리스트'] != null && filterTypeView['체크리스트']!) {
-        _listDairyContent[date]!.mapBranchCheckListDone.keys.forEach((element) {
-          if (filterBranchView[element] == true) {
-            ret = true;
+        _listDairyContent[date]!.mapBranchCheckListDone.forEach((key, value) {
+          if (filterBranchView[key] == true) {
+            value.forEach((key2, value2) {
+              if(value2 != 'false'){
+                ret = true;
+              }
+            });
           }
         });
       }

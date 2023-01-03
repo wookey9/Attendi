@@ -43,6 +43,34 @@ class BranchDatabase {
         .catchError((e) => print(e));
   }
 
+  static Future<void> addExpenseTypeItem({
+    required String companyId,
+    required int typeId,
+    required String value,
+  }) async {
+    DocumentReference documentReferencer = getExpenseTypeCollection(companyId: companyId).doc('types');
+
+    Map<String, dynamic> data = <String, dynamic>{
+      'type'+ typeId.toString() : value,
+    };
+
+    await documentReferencer
+        .set(data,SetOptions(merge: true))
+        .whenComplete(() => print("date item added to the database"))
+        .catchError((e) => print(e));
+  }
+
+  static Future<void> deleteExpenseTypeDoc({
+    required String companyId,
+  }) async {
+    DocumentReference documentReferencer = getExpenseTypeCollection(companyId: companyId).doc('types');
+
+    await documentReferencer
+        .delete()
+        .whenComplete(() => print('Note item deleted from the database'))
+        .catchError((e) => print(e));
+  }
+
   static Future<void> addCompanyListItem({
     required String companyId,
     required String key,
@@ -73,6 +101,11 @@ class BranchDatabase {
 
   static CollectionReference getBranchCheckListCollection({required String companyId, required String branch}) {
     CollectionReference notesItemCollection = mainCollection.doc(companyId).collection('branches').doc(branch).collection('checklist');
+    return notesItemCollection;
+  }
+
+  static CollectionReference getExpenseTypeCollection({required String companyId}) {
+    CollectionReference notesItemCollection = mainCollection.doc(companyId).collection('expense');
     return notesItemCollection;
   }
 

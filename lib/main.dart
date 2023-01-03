@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:ui';
+import 'package:app_tracking_transparency/app_tracking_transparency.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
@@ -77,9 +78,7 @@ void main() async {
     ));
   }
   else{
-    if(defaultTargetPlatform == TargetPlatform.iOS){
-      await MobileAds.instance.initialize();
-    }
+    await MobileAds.instance.initialize();
 
     runApp(MaterialApp(
       debugShowCheckedModeBanner: false,
@@ -140,11 +139,31 @@ class _CompanyLoginPageState extends State<CompanyLoginPage> {
   @override
   void initState(){
     fToast.init(context);
-    initDeepLinks();
+    //initDeepLinks();
     print('url : ' + Uri.base.toString());
 
     if(!kIsWeb){
-      SharedPreferences.getInstance().then((prefs) {
+      MobileAds.instance.updateRequestConfiguration(RequestConfiguration(
+          testDeviceIds: ['A7793781E9E54FD8A830CF098828710F','1C4BF5AAD672A0DA050C015B1550F3FF']
+      ));
+
+
+      SharedPreferences.getInstance().then((prefs) async{
+        if(defaultTargetPlatform == TargetPlatform.iOS){
+          // If the system can show an authorization request dialog
+          if (await AppTrackingTransparency.trackingAuthorizationStatus ==
+              TrackingStatus.notDetermined) {
+            // Show a custom explainer dialog before the system dialog
+            await showCustomTrackingDialog(context);
+            // Wait for dialog popping animation
+            await Future.delayed(const Duration(milliseconds: 200));
+            // Request system's tracking authorization dialog
+            await AppTrackingTransparency.requestTrackingAuthorization();
+          }
+        }
+
+        getMapBanner();
+
         String? value = prefs.getString('companycode');
         if(value != null && value.length > 0){
           value = value.toLowerCase();
@@ -160,14 +179,38 @@ class _CompanyLoginPageState extends State<CompanyLoginPage> {
           });
         }
       });
-
-      if(defaultTargetPlatform == TargetPlatform.iOS){
-        MobileAds.instance.updateRequestConfiguration(RequestConfiguration(
-            testDeviceIds: ['A7793781E9E54FD8A830CF098828710F']
-        ));
-      }
     }
 
+  }
+
+  Future<void> showCustomTrackingDialog(BuildContext context) async{
+    await showDialog<String>(
+        context: context,
+        builder: (BuildContext context) => WillPopScope(
+          onWillPop: () async{
+            return false;
+          },
+          child:AlertDialog(
+              contentPadding: EdgeInsets.all(10),
+              backgroundColor: Colors.black38,
+              title: Text('무료앱은 광고로 유지됩니다.',style: TextStyle(color: Colors.white,)),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children : [
+                  Text('사용자의 광고 활동 정보 (예: 광고를 본 후 수행한 작업)를 광고 서비스 제공업체와 공유할지 결정하세요. 공유된 정보는 개인에게 최적화된 광고경험을 제공하기 위해 사용합니다.', style: TextStyle(color: Colors.white70),),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: (){
+                    Navigator.pop(context);
+                  },
+                  child: Text('계속'),
+              ),
+            ],
+          ),
+        )
+    );
   }
 
   Future<void> initDeepLinks() async {

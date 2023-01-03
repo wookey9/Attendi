@@ -11,6 +11,7 @@ import 'package:fluttertoast/fluttertoast.dart';
 import 'package:intl/intl.dart';
 import 'package:pattern_formatter/numeric_formatter.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:work_inout/myAdBanner.dart';
 import 'package:work_inout/userScreen.dart';
 import 'package:work_inout/user_database.dart';
 import 'adminTimelineTab.dart';
@@ -21,7 +22,6 @@ import 'timelineScreen.dart';
 import 'package:flutter_speed_dial/flutter_speed_dial.dart';
 import 'checklist.dart';
 import 'myDownload.dart';
-import 'package:fl_chart/fl_chart.dart';
 
 const int wideModeThres = 680;
 
@@ -878,6 +878,7 @@ class _BranchEditPageState extends State<BranchEditPage> with AutomaticKeepAlive
   late List<String> _branchListOrg = [];
   late List<String> _removeBranchList = [];
   late List<TextEditingController> _branchEditControls = [];
+  late List<TextEditingController> _expTypeEditControls = [];
   late String _companyName;
   ScrollController _scrollController = ScrollController();
   late String _passwordNew = "";
@@ -887,6 +888,7 @@ class _BranchEditPageState extends State<BranchEditPage> with AutomaticKeepAlive
   late List<bool> _isSelectedMinInterval = [false,true,false];
   late List<int> _listMinInterval = [15,30,60];
   late bool _passwordFixFold = true;
+  late List<String> _expenseType = [];
 
   @override
   bool get wantKeepAlive => true;
@@ -897,6 +899,34 @@ class _BranchEditPageState extends State<BranchEditPage> with AutomaticKeepAlive
     _branchList = widget.branchList;
 
     _companyName = widget.company;
+    BranchDatabase.getExpenseTypeCollection(companyId: _companyName).get().then((QuerySnapshot querySnapshot) {
+      List<String> expType = [];
+      querySnapshot.docs.forEach((doc) {
+        var data = doc.data()! as Map<String, dynamic>;
+        data.forEach((key, value) {
+          expType.add(value);
+        });
+      });
+
+      if(expType.length > 0){
+        setState(() {
+          _expenseType = expType;
+        });
+      }
+      else{
+        setState((){
+          _expenseType = ['발주', '매장카드','계좌이체', '기타'];
+        });
+      }
+      setState((){
+        _expenseType.forEach((element) {
+          var editor = TextEditingController();
+          editor.text = element;
+          _expTypeEditControls.add(editor);
+        });
+      });
+    });
+
     UserDatabase.getMinuteIntervalDb(_companyName).then((value) {
       setState((){
         _minuteInterval = value;
@@ -925,7 +955,7 @@ class _BranchEditPageState extends State<BranchEditPage> with AutomaticKeepAlive
       _branchListOrg.add(element);
     });
 
-    widget.stream.listen((event) {
+    widget.stream.listen((event) async{
       bool returnTohome = false;
       if(event is int){
         if(event == 0){
@@ -933,16 +963,55 @@ class _BranchEditPageState extends State<BranchEditPage> with AutomaticKeepAlive
           print('interval save : $_minuteInterval');
           if(_minuteInterval > 0 && _minuteInterval <= 60){
             if(_minuteIntervalOrg != _minuteInterval){
+              returnTohome = true;
               UserDatabase.addAdminUserItem(companyId: _companyName, userUid: 'Administrator', key: 'minute_interval', value: _minuteInterval.toString());
               Fluttertoast.showToast(msg: '근무시간 단위가 변경되었습니다.', timeInSecForIosWeb: 5);
-              Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      settings: RouteSettings(name: '/'+ _companyName),
-                      builder: (context) => UserLoginPage(companyId: _companyName, title: 'Attendi'))
-              );
             }
           }
+
+          bool expTypeUpdate = false;
+          if(_expenseType.length == _expTypeEditControls.length){
+            _expTypeEditControls.forEach((element) {
+              if(_expenseType.contains(element.text)){
+
+              }
+              else{
+                expTypeUpdate = true;
+              }
+            });
+          }
+          else{
+            expTypeUpdate = true;
+          }
+
+          if(expTypeUpdate){
+            var expTypeCnt = 0;
+            _expTypeEditControls.forEach((element) {
+              if(element.text.length > 0){
+                expTypeCnt++;
+              }
+            });
+
+            if(expTypeCnt == 0){
+              Fluttertoast.showToast(msg: '지출유형은 최소 1개 이상 만들어주세요.', timeInSecForIosWeb: 5);
+              returnTohome = false;
+            }
+            else{
+              BranchDatabase.deleteExpenseTypeDoc(companyId: _companyName,);
+              _expenseType.clear();
+              int typeId = 0;
+              _expTypeEditControls.forEach((element) {
+                if(element.text.length > 0){
+                  BranchDatabase.addExpenseTypeItem(companyId: _companyName, typeId: typeId, value: element.text);
+                  _expenseType.add(element.text);
+                  typeId++;
+                }
+              });
+              Fluttertoast.showToast(msg: '지출유형이 변경되었습니다.', timeInSecForIosWeb: 5);
+              returnTohome = true;
+            }
+          }
+          
           if(_passwordOld.length > 0 && _passwordNew.length > 0){
             setState((){
               if(widget.adminPassword == _passwordOld){
@@ -953,6 +1022,7 @@ class _BranchEditPageState extends State<BranchEditPage> with AutomaticKeepAlive
 
                       UserDatabase.addAdminUserItem(companyId: _companyName,userUid: 'Administrator', key: 'password', value: _passwordNew);
                       Fluttertoast.showToast(msg: '비밀번호가 변경되었습니다.', timeInSecForIosWeb: 5);
+                      getMapBanner();
                       Navigator.push(
                           context,
                           MaterialPageRoute(
@@ -974,6 +1044,7 @@ class _BranchEditPageState extends State<BranchEditPage> with AutomaticKeepAlive
                 else{
                   UserDatabase.addAdminUserItem(companyId: _companyName,userUid: 'Administrator', key: 'password', value: _passwordNew);
                   Fluttertoast.showToast(msg: '비밀번호가 변경되었습니다.', timeInSecForIosWeb: 5);
+                  getMapBanner();
                   Navigator.push(
                       context,
                       MaterialPageRoute(
@@ -989,6 +1060,7 @@ class _BranchEditPageState extends State<BranchEditPage> with AutomaticKeepAlive
           }
           else{
             if(returnTohome){
+              getMapBanner();
               Navigator.push(
                   context,
                   MaterialPageRoute(
@@ -1050,11 +1122,7 @@ class _BranchEditPageState extends State<BranchEditPage> with AutomaticKeepAlive
         onTap: () {
           FocusScope.of(context).unfocus;
         },
-        child : Column(
-          children: [
-            Expanded(child: getBranchList(),),
-          ],
-        )
+        child : getBranchList()
     );
   }
 
@@ -1134,315 +1202,410 @@ class _BranchEditPageState extends State<BranchEditPage> with AutomaticKeepAlive
   }
 
   Widget getBranchList(){
-    return ListView.builder(itemCount: _branchList.length + 2,
-        controller: _scrollController,
-        itemBuilder: (BuildContext context, int index){
-      if(index == 0){
-        return Column(
-          children: [
-            SizedBox(height: 20,),
-            if(widget.email != null && widget.email!.length > 0) Padding(
-                padding: EdgeInsets.only(
-                    left: 10, top: 0, bottom: 0),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.email_outlined, color: Colors.white,
-                          size: 22,),
-                        Text(' Email',
-                          style: TextStyle(
-                            fontSize: 17, color: Colors.white,),
-                          textAlign: TextAlign.center,),
-                      ],
-                    ),
-                    Padding(
-                      padding: EdgeInsets.only(right: 10),
-                      child: Text(widget.email??"",
-                        style: TextStyle(
-                          fontSize: 17, color: Colors.white54,),
-                        textAlign: TextAlign.center,),
-                    )
-                  ],
-                )
-            ),
-            if(widget.email != null && widget.email!.length > 0) Divider(color: Colors.white38,
-                thickness: 1,
-                height: 40),
-            Padding(
-                padding: EdgeInsets.only(
-                    left: 10, top: 0, bottom: 0),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.attach_money, color: Colors.white,
-                          size: 22,),
-                        Text(' 최저시급',
-                          style: TextStyle(
-                            fontSize: 17, color: Colors.white,),
-                          textAlign: TextAlign.center,),
-                      ],
-                    ),
-                    Padding(
-                      padding: EdgeInsets.only(right: 10),
-                      child: Text(NumberFormat.currency(locale: 'ko', symbol: '₩').format(widget.lowestPay),
-                        style: TextStyle(
-                          fontSize: 17, color: Colors.white54,),
-                        textAlign: TextAlign.center,),
-                    )
-                  ],
-                )
-            ),
-            Divider(color: Colors.white38,
-                thickness: 1,
-                height: 40),
-            Padding(
-                padding: EdgeInsets.only(
-                    left: 10, top: 0, bottom: 0),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.timelapse_outlined, color: Colors.white,
-                          size: 22,),
-                        Text(' 근무시간 단위',
-                          style: TextStyle(
-                            fontSize: 17, color: Colors.white,),
-                          textAlign: TextAlign.center,),
-                      ],
-                    ),
-                    Container(
-                      padding: EdgeInsets.only(right: 10),
-                      child: ToggleButtons(
-                        borderColor: Colors.white70,
-                        color: Colors.white,
-                        selectedBorderColor: Colors.white70,
-                        fillColor: Colors.teal[300],
-                        selectedColor: Colors.white,
-                        textStyle: TextStyle(fontSize: 15),
-
-                        borderRadius: BorderRadius.all(Radius.circular(5)),
-                        isSelected: _isSelectedMinInterval,
-                        children: _listMinInterval.map((value) => Text(value.toString() + '분')).toList(),
-                        onPressed: (int index){
-                          if(_isSelectedMinInterval[index]){
-
-                          }
-                          else{
-                            for(int i = 0; i < _isSelectedMinInterval.length; i++){
-                              if(i == index){
-                                setState(() {
-                                  _isSelectedMinInterval[i] = true;
-                                  _minuteInterval = _listMinInterval[i];
-                                });
-                                print('min : $_minuteInterval');
-                              }
-                              else{
-                                setState((){
-                                  _isSelectedMinInterval[i] = false;
-                                });
-                              }
-                            }
-                          }
-                        },
-                      ),
-                    ),
-
-                  ],
-                ),
-            ),
-            Divider(color: Colors.white38,
-                thickness: 1,
-                height: 40),
-            Padding(
-                padding: EdgeInsets.only(
-                    left: 10, top: 0,),
-                child:   TextButton(
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
+    return SingleChildScrollView(
+      controller: _scrollController,
+      physics: const ClampingScrollPhysics(),
+      child: Column(
+        children: [
+          SizedBox(height: 20,),
+          if(widget.email != null && widget.email!.length > 0) Padding(
+              padding: EdgeInsets.only(
+                  left: 10, top: 0, bottom: 0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Row(
                     children: [
-                      Icon(Icons.password, color: Colors.white,
+                      Icon(Icons.email_outlined, color: Colors.white,
                         size: 22,),
-                      Text(' 비밀번호 변경 ',
+                      Text(' Email',
                         style: TextStyle(
                           fontSize: 17, color: Colors.white,),
                         textAlign: TextAlign.center,),
-                      if(_passwordFixFold) Icon(Icons.keyboard_arrow_down,color: Colors.white,
-                        size: 22,),
-                      if(!_passwordFixFold) Icon(Icons.keyboard_arrow_up,color: Colors.white,
-                        size: 22,)
                     ],
                   ),
-                  onPressed: (){
-                    setState(() {
-                      _passwordFixFold = !_passwordFixFold;
-                    });
-
-                  },
-                ),
-            ),
-            AnimatedContainer(
-              height: _passwordFixFold?0:180,
-              duration: Duration(milliseconds: 300),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+                  Padding(
+                    padding: EdgeInsets.only(right: 10),
+                    child: Text(widget.email??"",
+                      style: TextStyle(
+                        fontSize: 17, color: Colors.white54,),
+                      textAlign: TextAlign.center,),
+                  )
+                ],
+              )
+          ),
+          if(widget.email != null && widget.email!.length > 0) Divider(color: Colors.black26,
+              thickness: 7,
+              height: 40),
+          Padding(
+              padding: EdgeInsets.only(
+                  left: 10, top: 0, bottom: 0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Container(
-                    padding: EdgeInsets.all(10),
-                    child: TextFormField(
-                      style: TextStyle(color: Colors.white70),
-                      obscureText: true,
-                      decoration: const InputDecoration(
-                        border: OutlineInputBorder(borderSide: BorderSide(color: Colors.white70)),
-                        enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white70)),
-                        labelText: 'Old Password',
-                        labelStyle: TextStyle(color: Colors.white70),
-                      ),
-                      onChanged: ((value) => {
-                        setState((){
-                          _passwordOld = value;
-                        })
-                      }),
-                    ),
+                  Row(
+                    children: [
+                      Icon(Icons.attach_money, color: Colors.white,
+                        size: 22,),
+                      Text(' 최저시급',
+                        style: TextStyle(
+                          fontSize: 17, color: Colors.white,),
+                        textAlign: TextAlign.center,),
+                    ],
                   ),
-                  Container(
-                    padding: EdgeInsets.all(10),
-                    child:
-                    TextFormField(
-                      style: TextStyle(color: Colors.white70),
-                      obscureText: true,
-                      decoration: const InputDecoration(
-                        border: OutlineInputBorder(borderSide: BorderSide(color: Colors.white70)),
-                        enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white70)),
-                        labelText: 'New Password',
-                        labelStyle: TextStyle(color: Colors.white70),
-                      ),
-                      onChanged: ((value) => {
-                        setState(() {
-                          _passwordNew = value;
-                        })
-                      }),
-                    ),
-                  ),
+                  Padding(
+                    padding: EdgeInsets.only(right: 10),
+                    child: Text(NumberFormat.currency(locale: 'ko', symbol: '₩').format(widget.lowestPay),
+                      style: TextStyle(
+                        fontSize: 17, color: Colors.white54,),
+                      textAlign: TextAlign.center,),
+                  )
+                ],
+              )
+          ),
+          Divider(color: Colors.black26,
+              thickness: 7,
+              height: 40),
+          Padding(
+            padding: EdgeInsets.only(
+                left: 10, top: 0, bottom: 0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.timelapse_outlined, color: Colors.white,
+                      size: 22,),
+                    Text(' 근무시간 단위',
+                      style: TextStyle(
+                        fontSize: 17, color: Colors.white,),
+                      textAlign: TextAlign.center,),
+                  ],
+                ),
+                Container(
+                  padding: EdgeInsets.only(right: 10),
+                  child: ToggleButtons(
+                    borderColor: Colors.white70,
+                    color: Colors.white,
+                    selectedBorderColor: Colors.white70,
+                    fillColor: Colors.teal[300],
+                    selectedColor: Colors.white,
+                    textStyle: TextStyle(fontSize: 15),
 
+                    borderRadius: BorderRadius.all(Radius.circular(5)),
+                    isSelected: _isSelectedMinInterval,
+                    children: _listMinInterval.map((value) => Text(value.toString() + '분')).toList(),
+                    onPressed: (int index){
+                      if(_isSelectedMinInterval[index]){
+
+                      }
+                      else{
+                        for(int i = 0; i < _isSelectedMinInterval.length; i++){
+                          if(i == index){
+                            setState(() {
+                              _isSelectedMinInterval[i] = true;
+                              _minuteInterval = _listMinInterval[i];
+                            });
+                            print('min : $_minuteInterval');
+                          }
+                          else{
+                            setState((){
+                              _isSelectedMinInterval[i] = false;
+                            });
+                          }
+                        }
+                      }
+                    },
+                  ),
+                ),
+
+              ],
+            ),
+          ),
+          Divider(color: Colors.black26,
+              thickness: 7,
+              height: 40),
+          Padding(
+            padding: EdgeInsets.only(
+              left: 10, top: 0,),
+            child:   TextButton(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Icon(Icons.password, color: Colors.white,
+                    size: 22,),
+                  Text(' 비밀번호 변경 ',
+                    style: TextStyle(
+                      fontSize: 17, color: Colors.white,),
+                    textAlign: TextAlign.center,),
+                  if(_passwordFixFold) Icon(Icons.keyboard_arrow_down,color: Colors.white,
+                    size: 22,),
+                  if(!_passwordFixFold) Icon(Icons.keyboard_arrow_up,color: Colors.white,
+                    size: 22,)
                 ],
               ),
+              onPressed: (){
+                setState(() {
+                  _passwordFixFold = !_passwordFixFold;
+                });
+
+              },
             ),
-            Divider(color: Colors.white38,
-                thickness: 1,
-                height: 40),
-            Padding(
-                padding: EdgeInsets.only(
-                    left: 10, top: 0, bottom: 10),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        Icon(Icons.account_tree_outlined, color: Colors.white,
-                          size: 22,),
-                        Text(' 사업장 리스트',
-                          style: TextStyle(
-                            fontSize: 17, color: Colors.white,),
-                          textAlign: TextAlign.center,),
-                      ],
+          ),
+          AnimatedContainer(
+            height: _passwordFixFold?0:180,
+            duration: Duration(milliseconds: 300),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  padding: EdgeInsets.all(10),
+                  child: TextFormField(
+                    style: TextStyle(color: Colors.white70),
+                    obscureText: true,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(borderSide: BorderSide(color: Colors.white70)),
+                      enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white70)),
+                      labelText: 'Old Password',
+                      labelStyle: TextStyle(color: Colors.white70),
                     ),
-                    TextButton(
-                        onPressed: (){
-                          setState(() {
-                            _branchList.add('');
-                            _branchEditControls.add(TextEditingController());
-                            _scrollController.animateTo(
-                              _scrollController.position.maxScrollExtent + 100,
-                              duration: const Duration(seconds: 1),
-                              curve: Curves.fastOutSlowIn,
-                            );
-                          });
-                        },
-                        child: Container(
-                            child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                mainAxisSize: MainAxisSize.min,
-                                crossAxisAlignment: CrossAxisAlignment.center,
-                                children: [
-                                  Text('사업장 추가 ',style: TextStyle(color: Colors.white70,fontSize: 16),),
-                                  Icon(Icons.add, color: Colors.white,),
-                                ]
-                            )
-                        )
-                    )
-                  ],
-              )
-            ),
-          ],
-        );
-      }
-      else if(index == _branchList.length + 1){
-        return buildDeleteAccount();
-      }
-      else{
-        int brIdx = index - 1;
-        brIdx = max(brIdx, 0);
-        return
-          Container(
-                margin: const EdgeInsets.all(10),
-                padding: const EdgeInsets.only(left: 10),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.all(Radius.circular(5)),
-                  border: Border.all(
-                      color: Colors.white70
+                    onChanged: ((value) => {
+                      setState((){
+                        _passwordOld = value;
+                      })
+                    }),
                   ),
                 ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child:  TextFormField(
-                        decoration: InputDecoration(
-                          enabledBorder: UnderlineInputBorder(
-                            borderSide: BorderSide(
-                                color: Colors.transparent),
-                          ),
-                          focusedBorder: UnderlineInputBorder(
-                            borderSide: BorderSide(
-                                color: Colors.transparent),
-                          ),
-                        ),
-                        style: TextStyle(color: Colors.white70),
-                        controller: _branchEditControls[brIdx],
-                        onChanged: ((value){
-                          setState(() {
-                            if(_branchListOrg.contains(_branchList[brIdx])){
-                              _removeBranchList.add(_branchList[brIdx]);
-                            }
-                            _branchList[brIdx] = value;
-                          });
-                        }),
-                      ),
+                Container(
+                  padding: EdgeInsets.all(10),
+                  child:
+                  TextFormField(
+                    style: TextStyle(color: Colors.white70),
+                    obscureText: true,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(borderSide: BorderSide(color: Colors.white70)),
+                      enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white70)),
+                      labelText: 'New Password',
+                      labelStyle: TextStyle(color: Colors.white70),
                     ),
-                    IconButton(
-                      icon: Icon(Icons.close_rounded, size: 18, color: Colors.white70,),
+                    onChanged: ((value) => {
+                      setState(() {
+                        _passwordNew = value;
+                      })
+                    }),
+                  ),
+                ),
+
+              ],
+            ),
+          ),
+          Divider(color: Colors.black26,
+              thickness: 7,
+              height: 40),
+          Padding(
+              padding: EdgeInsets.only(
+                  left: 10, top: 0, bottom: 10),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Icon(Icons.account_tree_outlined, color: Colors.white,
+                        size: 22,),
+                      Text(' 사업장 리스트',
+                        style: TextStyle(
+                          fontSize: 17, color: Colors.white,),
+                        textAlign: TextAlign.center,),
+                    ],
+                  ),
+                  TextButton(
                       onPressed: (){
                         setState(() {
-                          _removeBranchList.add(_branchList[brIdx]);
-                          _branchList.removeAt(brIdx);
-                          _branchEditControls.removeAt(brIdx);
+                          _branchList.add('');
+                          _branchEditControls.add(TextEditingController());
+                          _scrollController.animateTo(
+                            _scrollController.position.maxScrollExtent + 100,
+                            duration: const Duration(seconds: 1),
+                            curve: Curves.fastOutSlowIn,
+                          );
                         });
                       },
-                    ),
+                      child: Container(
+                          child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                Text('사업장 추가 ',style: TextStyle(color: Colors.white70,fontSize: 16),),
+                                Icon(Icons.add, color: Colors.white,),
+                              ]
+                          )
+                      )
+                  )
                 ],
               )
-          );
-        }
-      }
+          ),
+          ListView.builder(itemCount: _branchList.length,
+              physics: const ClampingScrollPhysics(),
+              shrinkWrap: true,
+              itemBuilder: (BuildContext context, int index){
+                int brIdx = index;
+                brIdx = max(brIdx, 0);
+                return
+                  Container(
+                      margin: const EdgeInsets.all(10),
+                      padding: const EdgeInsets.only(left: 10),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.all(Radius.circular(5)),
+                        border: Border.all(
+                            color: Colors.white70
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child:  TextFormField(
+                              decoration: InputDecoration(
+                                enabledBorder: UnderlineInputBorder(
+                                  borderSide: BorderSide(
+                                      color: Colors.transparent),
+                                ),
+                                focusedBorder: UnderlineInputBorder(
+                                  borderSide: BorderSide(
+                                      color: Colors.transparent),
+                                ),
+                              ),
+                              style: TextStyle(color: Colors.white70),
+                              controller: _branchEditControls[brIdx],
+                              onChanged: ((value){
+                                setState(() {
+                                  if(_branchListOrg.contains(_branchList[brIdx])){
+                                    _removeBranchList.add(_branchList[brIdx]);
+                                  }
+                                  _branchList[brIdx] = value;
+                                });
+                              }),
+                            ),
+                          ),
+                          IconButton(
+                            icon: Icon(Icons.close_rounded, size: 18, color: Colors.white70,),
+                            onPressed: (){
+                              setState(() {
+                                _removeBranchList.add(_branchList[brIdx]);
+                                _branchList.removeAt(brIdx);
+                                _branchEditControls.removeAt(brIdx);
+                              });
+                            },
+                          ),
+                        ],
+                      )
+                  );
+              }
+          ),
+          Divider(color: Colors.black26,
+              thickness: 7,
+              height: 40),
+          Padding(
+              padding: EdgeInsets.only(
+                  left: 10, top: 0, bottom: 10),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Icon(Icons.credit_card, color: Colors.white,
+                        size: 22,),
+                      Text(' 지출유형',
+                        style: TextStyle(
+                          fontSize: 17, color: Colors.white,),
+                        textAlign: TextAlign.center,),
+                    ],
+                  ),
+                  TextButton(
+                      onPressed: (){
+                        setState(() {
+                          _expTypeEditControls.add(TextEditingController());
+                          _scrollController.animateTo(
+                            _scrollController.position.maxScrollExtent + 100,
+                            duration: const Duration(seconds: 1),
+                            curve: Curves.fastOutSlowIn,
+                          );
+                        });
+                      },
+                      child: Container(
+                          child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                Text('지출유형 추가 ',style: TextStyle(color: Colors.white70,fontSize: 16),),
+                                Icon(Icons.add, color: Colors.white,),
+                              ]
+                          )
+                      )
+                  )
+                ],
+              )
+          ),
+          ListView.builder(itemCount: _expTypeEditControls.length,
+              physics: const ClampingScrollPhysics(),
+              shrinkWrap: true,
+              itemBuilder: (BuildContext context, int index){
+                return
+                  Container(
+                      margin: const EdgeInsets.all(10),
+                      padding: const EdgeInsets.only(left: 10),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.all(Radius.circular(5)),
+                        border: Border.all(
+                            color: Colors.white70
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child:  TextFormField(
+                              decoration: InputDecoration(
+                                enabledBorder: UnderlineInputBorder(
+                                  borderSide: BorderSide(
+                                      color: Colors.transparent),
+                                ),
+                                focusedBorder: UnderlineInputBorder(
+                                  borderSide: BorderSide(
+                                      color: Colors.transparent),
+                                ),
+                              ),
+                              style: TextStyle(color: Colors.white70),
+                              controller: _expTypeEditControls[index],
+                              onChanged: ((value){
+
+                              }),
+                            ),
+                          ),
+                          IconButton(
+                            icon: Icon(Icons.close_rounded, size: 18, color: Colors.white70,),
+                            onPressed: (){
+                              setState(() {
+                                _expTypeEditControls.removeAt(index);
+                              });
+                            },
+                          ),
+                        ],
+                      )
+                  );
+              }
+          ),
+
+          buildDeleteAccount()
+        ],
+      ),
     );
+
   }
 }
 
@@ -2453,26 +2616,6 @@ class _BranchPageState extends State<BranchPage> with AutomaticKeepAliveClientMi
         cell.setFormula(sumFormula);
         cell.cellStyle = globalStyle;
 
-        cell = sheet.getRangeByIndex(40 + gridRowOffset, 1);
-        cell.setText("지출현황");
-        cell.cellStyle = globalStyle;
-
-        for(int i = 0; i < expenseType.length; i++) {
-          cell = sheet.getRangeByIndex(41 + gridRowOffset, 1 + i);
-          cell.setText(expenseType[i]);
-          cell.cellStyle = globalStyle;
-        }
-        cell = sheet.getRangeByIndex(41 + gridRowOffset, 1 + expenseType.length);
-        cell.setText('합계');
-        cell.cellStyle = globalStyle;
-
-        cell = sheet.getRangeByIndex(42 + gridRowOffset, 1 + expenseType.length);
-        sumStartCell = sheet.getRangeByIndex(42 + gridRowOffset, 1).addressLocal;
-        sumEndCell = sheet.getRangeByIndex(42 + gridRowOffset, expenseType.length).addressLocal;
-        sumFormula = '=SUM(' + sumStartCell + ':' + sumEndCell + ')';
-        cell.setFormula(sumFormula);
-        cell.cellStyle = globalStyle;
-
         cell = sheet.getRangeByIndex(44 + gridRowOffset, 1);
         cell.setText("지출내역");
         cell.cellStyle = globalStyle;
@@ -2549,6 +2692,8 @@ class _BranchPageState extends State<BranchPage> with AutomaticKeepAliveClientMi
         });
       });
 
+      List<String> expTypes = [];
+
       if(listExpenseInfo.length > 0){
         int exIdx = 0;
         int preMon = listExpenseInfo[0].date!.month;
@@ -2592,6 +2737,9 @@ class _BranchPageState extends State<BranchPage> with AutomaticKeepAliveClientMi
                 }
 
                 if(exInfo.type != null){
+                  if(!expTypes.contains(exInfo.type)){
+                    expTypes.add(exInfo.type!);
+                  }
                   if(totalExpense[sheetName] == null) totalExpense[sheetName] = {};
                   if(totalExpense[sheetName]![exInfo.type!] == null) totalExpense[sheetName]![exInfo.type!] = 0;
                   totalExpense[sheetName]![exInfo.type!] = totalExpense[sheetName]![exInfo.type!]! + m;
@@ -2614,9 +2762,29 @@ class _BranchPageState extends State<BranchPage> with AutomaticKeepAliveClientMi
           sheet = workbook.worksheets[key];
           Map<String, double> mapTotal = value;
 
-          for(int i = 0; i < expenseType.length; i++){
-            var type = expenseType[i];
-            var cell = sheet.getRangeByIndex(42 + gridRowOffset, 1 + i);
+          var cell = sheet.getRangeByIndex(40 + gridRowOffset, 1);
+          cell.setText("지출현황");
+          cell.cellStyle = globalStyle;
+
+          for(int i = 0; i < expTypes.length; i++) {
+            cell = sheet.getRangeByIndex(41 + gridRowOffset, 1 + i);
+            cell.setText(expTypes[i]);
+            cell.cellStyle = globalStyle;
+          }
+          cell = sheet.getRangeByIndex(41 + gridRowOffset, 1 + expTypes.length);
+          cell.setText('합계');
+          cell.cellStyle = globalStyle;
+
+          cell = sheet.getRangeByIndex(42 + gridRowOffset, 1 + expTypes.length);
+          var sumStartCell = sheet.getRangeByIndex(42 + gridRowOffset, 1).addressLocal;
+          var sumEndCell = sheet.getRangeByIndex(42 + gridRowOffset, expTypes.length).addressLocal;
+          var sumFormula = '=SUM(' + sumStartCell + ':' + sumEndCell + ')';
+          cell.setFormula(sumFormula);
+          cell.cellStyle = globalStyle;
+
+          for(int i = 0; i < expTypes.length; i++){
+            var type = expTypes[i];
+            cell = sheet.getRangeByIndex(42 + gridRowOffset, 1 + i);
             cell.setNumber(mapTotal[type]);
             cell.cellStyle = globalStyle;
           }
@@ -2925,28 +3093,42 @@ class _BranchPageState extends State<BranchPage> with AutomaticKeepAliveClientMi
 
     if(_listDiaryContent[date] != null){
       if(filterTypeView['근무현황'] != null && filterTypeView['근무현황']!){
-        _listDiaryContent[date]!.mapBranchUserTime.keys.forEach((element) {
-          ret = true;
+        _listDiaryContent[date]!.mapBranchUserTime.forEach((key, value) {
+          value.forEach((key, value) {
+            if(value.length > 0){
+              ret = true;
+            }
+          });
         });
       }
 
-      if(filterTypeView['지출현황'] != null && filterTypeView['지출현황']!) {
-        _listDiaryContent[date]!.mapBranchUserExpense.keys.forEach((element) {
-          if(element.length > 0){
-            ret = true;
-          }
+      if(filterTypeView['지출현황'] != null && filterTypeView['지출현황']! && ret == false) {
+        _listDiaryContent[date]!.mapBranchUserExpense.forEach((key, value) {
+          value.forEach((key, value) {
+            if(value.length > 0){
+              ret = true;
+            }
+          });
         });
       }
 
-      if(filterTypeView['체크리스트'] != null && filterTypeView['체크리스트']!) {
-        _listDiaryContent[date]!.mapBranchCheckListDone.keys.forEach((element) {
-          ret = true;
+      if(filterTypeView['체크리스트'] != null && filterTypeView['체크리스트']! && ret == false) {
+        _listDiaryContent[date]!.mapBranchCheckListDone.forEach((key, value) {
+          value.forEach((key, value) {
+            if(value != 'false'){
+              ret = true;
+            }
+          });
         });
       }
 
-      if(filterTypeView['업무일지'] != null && filterTypeView['업무일지']!) {
-        _listDiaryContent[date]!.mapBranchUserDiary.keys.forEach((element) {
-          ret = true;
+      if(filterTypeView['업무일지'] != null && filterTypeView['업무일지']! && ret == false) {
+        _listDiaryContent[date]!.mapBranchUserDiary.forEach((key, value) {
+          value.forEach((key, value) {
+            if(value.length > 0){
+              ret = true;
+            }
+          });
         });
       }
     }

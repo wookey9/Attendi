@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:html';
 import 'dart:io';
 import 'dart:math';
 import 'package:day_night_time_picker/lib/state/time.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webviewx/webviewx.dart';
@@ -29,8 +31,6 @@ import 'package:flutter_time_picker_spinner/flutter_time_picker_spinner.dart';
 import 'package:pattern_formatter/pattern_formatter.dart';
 
 import 'myAdBanner.dart';
-
-const List<String> expenseType = ['발주', '매장카드','계좌이체', '기타'];
 const int wideModeThres = 780;
 
 class TimeLinePage extends StatefulWidget{
@@ -112,6 +112,7 @@ class _TimeLineState extends State<TimeLinePage> {
   String _formatNumber(String s) => NumberFormat.decimalPattern(_locale).format(int.parse(s));
   String get _currency => NumberFormat.compactSimpleCurrency(locale: _locale).currencySymbol;
   late InterstitialAd _interstitialAd;
+  List<String> _expenseType = [];
 
   @override
   void initState() {
@@ -122,25 +123,44 @@ class _TimeLineState extends State<TimeLinePage> {
     super.initState();
 
     if(!kIsWeb){
-      if(defaultTargetPlatform == TargetPlatform.iOS){
-        InterstitialAd.load(
-            adUnitId: FULL_UNIT_ID,
-            request: AdRequest(),
-            adLoadCallback: InterstitialAdLoadCallback(
-              onAdLoaded: (InterstitialAd ad) {
-                // Keep a reference to the ad so you can show it later.
-                _interstitialAd = ad;
-                print('InterstitialAd loaded');
-              },
-              onAdFailedToLoad: (LoadAdError error) {
-                print('InterstitialAd failed to load: $error');
-              },
-            ));
-      }
+      InterstitialAd.load(
+          adUnitId: (defaultTargetPlatform == TargetPlatform.iOS) ? FULL_UNIT_ID : AND_FULL_UNIT_ID,
+          request: AdRequest(),
+          adLoadCallback: InterstitialAdLoadCallback(
+            onAdLoaded: (InterstitialAd ad) {
+              // Keep a reference to the ad so you can show it later.
+              _interstitialAd = ad;
+              print('InterstitialAd loaded');
+            },
+            onAdFailedToLoad: (LoadAdError error) {
+              print('InterstitialAd failed to load: $error');
+            },
+          ));
     }
 
+    BranchDatabase.getExpenseTypeCollection(companyId: widget.companyId).get().then((QuerySnapshot querySnapshot) {
+      List<String> expType = [];
+      querySnapshot.docs.forEach((doc) {
+        var data = doc.data()! as Map<String, dynamic>;
+        data.forEach((key, value) {
+          expType.add(value);
+        });
+      });
+
+      if(expType.length > 0){
+        setState(() {
+          _expenseType = expType;
+        });
+      }
+      else{
+        setState((){
+          _expenseType = ['발주', '매장카드','계좌이체', '기타'];
+        });
+      }
+    });
+
     SharedPreferences.getInstance().then((prefs) {
-      final String? value = prefs.getString('noticeshow');
+      final String? value = prefs.getString(widget.companyId + 'noticeshow');
       if(value != null && value.length > 0){
         DateTime date = DateFormat('yyyy-MM-dd').parse(value);
         //date = date.subtract(Duration(days: 6));
@@ -571,59 +591,77 @@ class _TimeLineState extends State<TimeLinePage> {
             if(kIsWeb){
               showDialog<String>(
                   context: context,
-                  builder: (BuildContext context) => WillPopScope(
-                    onWillPop: () async{
-                      return false;
-                    },
-                    child: AlertDialog(
-                        contentPadding: EdgeInsets.zero,
-                        backgroundColor: Colors.black38,
-                        content: Stack(
-                          children: [
-                            getAdBanner('square-banner'),
-                            Container(
-                              constraints: BoxConstraints(maxWidth: 40, maxHeight: 30),
-                              alignment: Alignment.topLeft,
-                              child: WebViewAware(
-                                child:  IconButton(
-                                  highlightColor: Colors.transparent,
-                                  focusColor: Colors.transparent,
-                                  splashColor: Colors.transparent,
-                                  icon: Icon(Icons.cancel_rounded, color: Colors.grey, size: 20,),
-                                  onPressed:(){
-                                    Navigator.pop(context, 'Cancel');
-                                  },
-                                ),
-                              ),
-                            ),
-                          ],
-                        )
+                  builder: (BuildContext context) {
+                    return WillPopScope(
+                      onWillPop: () async {
+                        return false;
+                      },
+                      child: AlertDialog(
+                          contentPadding: EdgeInsets.zero,
+                          backgroundColor: Colors.black38,
+                          content: Stack(
+                            children: [
+                              getAdBanner('square-banner'),
+                              WebViewAware(
+                                child: Container(
+                                    padding: EdgeInsets.all(10),
+                                    child: GestureDetector(
+                                        onTapDown: (detail) {
+                                          print('[d] x : ' +
+                                              detail.globalPosition.dx
+                                                  .toString() + ' / y : ' +
+                                              detail.globalPosition.dy
+                                                  .toString());
+                                          if (GestureBinding.instance != null) {
+                                            GestureBinding.instance
+                                                .handlePointerEvent(
+                                                PointerDownEvent(
 
-                    ),
-                  )
+                                                  position: Offset(
+                                                      detail.globalPosition.dx +
+                                                          100,
+                                                      detail.globalPosition.dy +
+                                                          100),
+                                                ));
+                                          }
+                                        },
+                                        onTapUp: (detail) {
+                                          print('[u] x : ' +
+                                              detail.globalPosition.dx
+                                                  .toString() + ' / y : ' +
+                                              detail.globalPosition.dy
+                                                  .toString());
+                                          if (GestureBinding.instance != null) {
+                                            GestureBinding.instance
+                                                .handlePointerEvent(
+                                                PointerUpEvent(
+                                                  position: Offset(
+                                                      detail.globalPosition.dx +
+                                                          100,
+                                                      detail.globalPosition.dy +
+                                                          100),
+                                                ));
+                                          }
+
+                                          Navigator.pop(context, 'Cancel');
+                                        },
+                                        child: Icon(Icons.cancel_rounded,
+                                          color: Colors.grey, size: 20,)
+                                    )
+                                ),
+                              )
+                            ],
+                          )
+
+                      ),
+                    );
+                  }
               );
             }
             else{
-              if(defaultTargetPlatform == TargetPlatform.iOS){
-                print('InterstitialAd showed');
-                if(_interstitialAd != null){
-
-                  _interstitialAd.show();
-                  InterstitialAd.load(
-                      adUnitId: FULL_UNIT_ID,
-                      request: AdRequest(),
-                      adLoadCallback: InterstitialAdLoadCallback(
-                        onAdLoaded: (InterstitialAd ad) {
-                          // Keep a reference to the ad so you can show it later.
-                          _interstitialAd = ad;
-                          print('InterstitialAd loaded');
-                        },
-                        onAdFailedToLoad: (LoadAdError error) {
-                          print('InterstitialAd failed to load: $error');
-                        },
-                      ));
-
-                }
+              print('InterstitialAd showed');
+              if(_interstitialAd != null){
+                _interstitialAd.show();
               }
             }
 
@@ -1088,7 +1126,7 @@ class _TimeLineState extends State<TimeLinePage> {
 
                                   hint: Text("지출 유형", style: TextStyle(color : Colors.white70), ),
                                   underline: Container(),
-                                  items: expenseType.map((String value) {
+                                  items: _expenseType.map((String value) {
                                     return DropdownMenuItem(
                                       value: value,
                                       child: Text(value, style: TextStyle(color : Colors.white70),),
@@ -1646,7 +1684,7 @@ class _TimeLineState extends State<TimeLinePage> {
             onWillPop: () async{
               return false;
             },
-            child: AlertDialog(
+            child:AlertDialog(
                 contentPadding: EdgeInsets.zero,
                 backgroundColor: Colors.black38,
                 content: Stack(
@@ -1689,7 +1727,7 @@ class _TimeLineState extends State<TimeLinePage> {
                           icon: Icon(Icons.cancel_rounded, color: Colors.grey, size: 20,),
                           onPressed:(){
                             SharedPreferences.getInstance().then((prefs) {
-                              prefs.setString('noticeshow', DateTime.now().toString());
+                              prefs.setString(widget.companyId + 'noticeshow', DateTime.now().toString());
                               Navigator.pop(context, 'Cancel');
                             });
                           },
@@ -1805,6 +1843,9 @@ class _TimeLineState extends State<TimeLinePage> {
         var expenseItem = ExpenseItem();
         expenseInfo.forEach((key, value) {
           if(key == 'type'){
+            if(!_expenseType.contains(value)){
+              value = _expenseType[0];
+            }
             expenseItem.type = value;
           }
           else if(key == 'money'){
